@@ -29,6 +29,21 @@ def _fmt_hms(total_seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
 
+def _maybe_start_break(conn, cfg, stopped, confirm=None) -> bool:
+    """After a pomodoro FOCUS session, offer to start the break automatically.
+    Returns True if a pause session was started. `confirm` is injectable for tests."""
+    if confirm is None:
+        confirm = typer.confirm  # resolved at call time so tests can monkeypatch
+    if stopped.kind != "focus":
+        return False
+    if not confirm(tr("timer.break_prompt", brk=cfg.pomodoro_break_min), default=True):
+        return False
+    brk = core.start(conn, stopped.project_id, task_id=stopped.task_id,
+                     kind="pause", minutes=cfg.pomodoro_break_min)
+    console.print(tr("timer.break_started", id=brk.id, brk=cfg.pomodoro_break_min))
+    return True
+
+
 def _interactive_timer(conn, pomodoro: bool) -> None:
     """Blocking live timer in the terminal until Ctrl+C, then stop + note."""
     cfg = cfgmod.load_config()
@@ -52,10 +67,9 @@ def _interactive_timer(conn, pomodoro: bool) -> None:
         console.print(
             tr("timer.stopped", id=stopped.id, dur=stopped.duration_min)
         )
-        if pomodoro:
-            console.print(
-                tr("timer.pomodoro_hint", brk=cfg.pomodoro_break_min)
-            )
+        if pomodoro and stopped.kind == "focus":
+            if _maybe_start_break(conn, cfg, stopped):
+                _interactive_timer(conn, pomodoro=False)  # run the break timer (no loop)
 
 
 @app.command("start", help=tr("session.start.help"))

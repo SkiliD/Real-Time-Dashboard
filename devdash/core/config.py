@@ -45,6 +45,7 @@ class Config:
     ai_api_key: str = ""             # never hardcoded, never logged
     ai_base_url: str = ""            # e.g. "https://api.mistral.ai/v1" | "http://localhost:11434" | "http://localhost:1234/v1"
     ai_cli_command: str = ""         # for ai_provider="cli": e.g. "llama-cli -m model.gguf --no-display"
+    ai_context_max_chars: int = 6000  # max size of the compact context sent to the model
     ai_feature_flags: dict = field(default_factory=lambda: {
         "chat": True, "summarize": True, "plan": True, "feature_verdict": True,
     })
@@ -89,6 +90,7 @@ _KEY_TYPES: dict[str, tuple[type, ...]] = {
     "ai_api_key": (str,),
     "ai_base_url": (str,),
     "ai_cli_command": (str,),
+    "ai_context_max_chars": (int,),
     "ai_feature_flags": (dict,),
     "commit_patterns": (list,),
     "pomodoro_focus_min": (int,),

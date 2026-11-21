@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from devdash.core import features as feats
 from devdash.core import tasks as core
 from devdash.core.i18n import tr, tr_cols
 from ..deps import get_conn, guard, resolve_project
@@ -78,17 +79,27 @@ def list_tasks(
     status: list[str] = typer.Option([], "--status", "-s", help=tr("opt.filter_status")),
     priority: str | None = typer.Option(None, "--priority", help=tr("opt.filter_priority")),
     tag: str | None = typer.Option(None, "--tag", "-t", help=tr("opt.filter_tag")),
+    feature: str | None = typer.Option(None, "--feature", "-f", help=tr("opt.filter_feature")),
     all: bool = typer.Option(False, "--all", "-a", help=tr("opt.all_cancelled")),
 ) -> None:
     """List tasks with filters (default: all non-cancelled tasks of all projects)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project) if project else None
+    feature_id = None
+    if feature:
+        # a feature name is scoped to the resolved (or active) project
+        proj = proj or resolve_project(conn, None)
+        f = feats.get(conn, feature, proj.id)
+        if f is None:
+            raise typer.BadParameter(tr("err.no_feature", ref=feature))
+        feature_id = f.id
     result = core.list(
         conn,
         project_id=proj.id if proj else None,
         status=status or None,
         priority=priority,
         tag=tag,
+        feature_id=feature_id,
         include_cancelled=all,
     )
     data = {"count": len(result), "tasks": [t.to_dict() for t in result]}

@@ -41,7 +41,13 @@ def run(port: int | None = None, browser: bool = False, home: Path | None = None
         except KeyboardInterrupt:
             pass
     else:
-        import webview  # optional dependency: pip install -e ".[gui]"
+        try:
+            import webview  # optional dependency: pip install -e ".[gui]"
+        except ImportError:
+            # also covers a frozen PyInstaller build made with --no-gui
+            from devdash.core.i18n import tr
+            print(tr("err.no_pywebview"))
+            raise SystemExit(1) from None
 
         print(f"DevDash GUI (native window): {url}")
         webview.create_window(

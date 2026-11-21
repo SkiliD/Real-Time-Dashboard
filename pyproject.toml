@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 gui = ["pywebview>=5.0"]   # native desktop window (uses the OS webview: WebView2 on Windows)
 test = ["pytest>=8.0"]
+build = ["pyinstaller>=6.0"]  # standalone executable: scripts/build_exe.py
 
 [project.scripts]
 devdash = "devdash.cli.main:entrypoint"

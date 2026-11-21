@@ -171,10 +171,10 @@ function renderProjects() {
       `<span>${escapeHtml(p.name)}</span>` +
       `<span class="meta">${T("engine." + p.engine)}</span>`;
     li.title = p.slug + " — " + T("pstatus." + p.status);
-    li.onclick = async () => {
+    li.onclick = () => runAction(async () => {
       await api.post("/api/projects/set-active", { ref: p.slug });
       await loadAll();
-    };
+    });
     ul.appendChild(li);
   }
 }
@@ -231,10 +231,10 @@ function taskCard(t) {
     `<div class="row"><span class="prio prio-${t.priority}">${T("prio." + t.priority)}</span>${tags}${est}</div>` +
     `<div class="actions">${actions.join("")}</div>`;
   card.querySelectorAll("button[data-act]").forEach((b) => {
-    b.onclick = async () => {
+    b.onclick = () => runAction(async () => {
       await api.post("/api/tasks/status", { id: t.id, status: b.dataset.act });
       await loadAll();
-    };
+    });
   });
   return card;
 }
@@ -397,7 +397,7 @@ function renderFeatures() {
       `<span class="dim">${T("gui.feat.progress", { done: p.done, total: p.total, pct: p.pct })}</span></div>` +
       `<div class="feat-actions">${actions}</div>`;
     li.querySelectorAll("button[data-act]").forEach((b) => {
-      b.onclick = async () => {
+      b.onclick = () => runAction(async () => {
         const act = b.dataset.act;
         if (act === "done") await api.post("/api/features/done", { ref: f.name });
         if (act === "approve") await api.post("/api/features/approve", { ref: f.name });
@@ -413,15 +413,15 @@ function renderFeatures() {
           renderChat();
         }
         await loadAll();
-      };
+      });
     });
     const sel = li.querySelector("select[data-act=attach]");
-    if (sel) sel.onchange = async () => {
+    if (sel) sel.onchange = () => runAction(async () => {
       if (sel.value) {
         await api.post("/api/features/attach", { ref: f.name, task_id: parseInt(sel.value, 10) });
         await loadAll();
       }
-    };
+    });
     ul.appendChild(li);
   }
   if (!ul.children.length) ul.innerHTML = `<li class="dim">${T("gui.feat.empty")}</li>`;
@@ -571,6 +571,21 @@ async function chatPlan(apply) {
   }
 }
 
+/* ---------- error surfacing: a failed action must never look like "nothing happened" ---------- */
+
+function showError(msg) {
+  const t = $("#toast");
+  t.textContent = "⚠ " + msg;
+  t.classList.remove("hidden");
+  clearTimeout(showError._h);
+  showError._h = setTimeout(() => t.classList.add("hidden"), 6000);
+}
+
+// wrap every UI action: API errors (400/500/...) land in the toast
+async function runAction(fn) {
+  try { await fn(); } catch (e) { showError(e.message); }
+}
+
 /* ---------- actions ---------- */
 
 async function addTask() {
@@ -639,34 +654,33 @@ function switchTab(tab) {
 
 /* ---------- wiring ---------- */
 
-$("#btn-add-task").onclick = addTask;
-$("#new-task-title").addEventListener("keydown", (e) => { if (e.key === "Enter") addTask(); });
+$("#btn-add-task").onclick = () => runAction(addTask);
+$("#new-task-title").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(addTask); });
 $("#btn-new-project").onclick = openModal;
 $("#btn-cancel-modal").onclick = closeModal;
-$("#btn-create-project").onclick = createProject;
-$("#filter-tag").onchange = async (e) => { state.filterTag = e.target.value; await loadTasks(); renderKanban(); };
-$("#btn-session-start").onclick = startSession;
-$("#btn-session-stop").onclick = stopSession;
-$("#session-note").addEventListener("keydown", (e) => { if (e.key === "Enter") stopSession(); });
-$("#btn-add-log").onclick = addLog;
-$("#log-content").addEventListener("keydown", (e) => { if (e.key === "Enter") addLog(); });
+$("#btn-create-project").onclick = () => runAction(createProject);
+$("#filter-tag").onchange = async (e) => { state.filterTag = e.target.value; await runAction(async () => { await loadTasks(); renderKanban(); }); };
+$("#btn-session-start").onclick = () => runAction(startSession);
+$("#btn-session-stop").onclick = () => runAction(stopSession);
+$("#session-note").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(stopSession); });
+$("#btn-add-log").onclick = () => runAction(addLog);
+$("#log-content").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(addLog); });
 $("#log-search").addEventListener("input", async (e) => {
   state.logQuery = e.target.value;
-  await loadLogs();
-  renderLogs();
+  await runAction(async () => { await loadLogs(); renderLogs(); });
 });
 document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
-$("#btn-git-link").onclick = gitLink;
-$("#btn-git-sync").onclick = gitSync;
-$("#btn-git-unlink").onclick = async () => { await api.post("/api/git/unlink", {}); await loadAll(); };
-$("#git-unparsed").onchange = async (e) => { state.gitUnparsed = e.target.checked; await loadGit(); renderGit(); };
-$("#btn-add-feature").onclick = addFeature;
-$("#feature-name").addEventListener("keydown", (e) => { if (e.key === "Enter") addFeature(); });
-$("#btn-chat-send").onclick = chatSend;
-$("#chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") chatSend(); });
-$("#btn-chat-week").onclick = chatWeek;
-$("#btn-chat-context").onclick = chatContext;
-$("#btn-plan").onclick = () => {
+$("#btn-git-link").onclick = () => runAction(gitLink);
+$("#btn-git-sync").onclick = () => runAction(gitSync);
+$("#btn-git-unlink").onclick = () => runAction(async () => { await api.post("/api/git/unlink", {}); await loadAll(); });
+$("#git-unparsed").onchange = async (e) => { state.gitUnparsed = e.target.checked; await runAction(async () => { await loadGit(); renderGit(); }); };
+$("#btn-add-feature").onclick = () => runAction(addFeature);
+$("#feature-name").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(addFeature); });
+$("#btn-chat-send").onclick = () => runAction(chatSend);
+$("#chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(chatSend); });
+$("#btn-chat-week").onclick = () => runAction(chatWeek);
+$("#btn-chat-context").onclick = () => runAction(chatContext);
+$("#btn-plan").onclick = () => runAction(() => {
   if (state.pendingPlan) {
     // explicit confirmation: second click = create the subtasks (apply).
     // Set the input FIRST: chatPlan reads it synchronously.
@@ -676,7 +690,7 @@ $("#btn-plan").onclick = () => {
   } else {
     chatPlan(false);
   }
-};
+});
 
 /* ---------- live updates ---------- */
 
@@ -702,8 +716,14 @@ api.get("/api/i18n")
   .then((d) => { I18N = d; applyI18n(); })
   .catch(() => {})
   .finally(() => loadAll().then(() => api.get("/api/status").then((s) => { state.lastEventId = s.last_event_id || 0; })));
-const POLL_MS = 1500;
-setInterval(pollEvents, POLL_MS);
+// adaptive polling: fast while visible, slow while the tab/window is hidden
+// (the connection dot still updates, but we stop hammering the API)
+const POLL_FAST_MS = 1500, POLL_HIDDEN_MS = 10000;
+async function pollLoop() {
+  await pollEvents();
+  setTimeout(pollLoop, document.hidden ? POLL_HIDDEN_MS : POLL_FAST_MS);
+}
+pollLoop();
 
 /* ---------- utils ---------- */
 

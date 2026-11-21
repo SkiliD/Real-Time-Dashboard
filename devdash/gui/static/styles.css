@@ -229,3 +229,12 @@ body {
 .chart-box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; height: 260px; display: flex; flex-direction: column; }
 .chart-box h4 { margin: 0 0 8px; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
 .chart-box canvas { flex: 1; min-height: 0; }
+
+/* error toast (P0: action failures must be visible, never silent) */
+#toast {
+  position: fixed; right: 16px; bottom: 16px; z-index: 100;
+  max-width: 420px; padding: 10px 14px; border-radius: 8px;
+  background: #3a1d22; border: 1px solid var(--red); color: #ffb4b4;
+  font-size: 13px; box-shadow: 0 6px 24px rgba(0,0,0,.5);
+}
+#toast.hidden { display: none; }

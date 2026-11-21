@@ -150,6 +150,7 @@ def test_interactive_timer_ctrl_c_stops_with_note(home, monkeypatch):
 
     monkeypatch.setattr(session_cmd.time, "sleep", boom)
     monkeypatch.setattr(session_cmd.typer, "prompt", lambda *a, **k: "fait X")
+    monkeypatch.setattr(session_cmd.typer, "confirm", lambda *a, **k: False)  # decline the auto-break
     conn = db.connect(config.db_path())
     db.init_db(conn)
     session_cmd._interactive_timer(conn, pomodoro=True)  # catches KeyboardInterrupt internally

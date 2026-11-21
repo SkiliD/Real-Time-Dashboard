@@ -44,6 +44,7 @@ class Api:
             with self._db_lock:
                 if not self._db_ready:
                     db.init_db(conn)
+                    ev.prune(conn)  # bound the append-only event bus once per process
                     self._db_ready = True
         try:
             yield conn
@@ -206,7 +207,7 @@ class Api:
             return {
                 "project": pid,
                 "time_by_day": stats.time_by_day(c, pid, days),
-                "tasks_done_by_day": stats.tasks_done_by_day(c, pid, 7),
+                "tasks_done_by_day": stats.tasks_done_by_day(c, pid, days),  # same window as time_by_day
                 "minutes": {
                     "today": stats.today_minutes(c, pid),
                     "week": stats.period_minutes(c, pid, 7),

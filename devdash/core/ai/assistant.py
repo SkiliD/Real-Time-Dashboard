@@ -89,11 +89,11 @@ def context_preview(conn: sqlite3.Connection, home: Path | None = None) -> dict:
     audit what a cloud provider would receive before enabling it.
     """
     cfg = cfgmod.load_config(home)
-    text = ctx_mod.build_context(conn)
+    text = ctx_mod.build_context(conn, max_chars=cfg.ai_context_max_chars)
     return {
         "context": text,
         "chars": len(text),
-        "max_chars": ctx_mod.DEFAULT_MAX_CHARS,
+        "max_chars": cfg.ai_context_max_chars,
         "ai_enabled": cfg.ai_enabled,
         "provider": cfg.ai_provider if cfg.ai_enabled else None,
         "cloud": ai_status(cfg)["cloud"],
@@ -104,7 +104,7 @@ def ask(conn: sqlite3.Connection, question: str, home: Path | None = None) -> di
     """Free chat with the project context ('où en suis-je ?', 'mes blocages ?')."""
     cfg, provider = _cfg_and_provider(home)
     _flag(cfg, "chat", home)
-    sys_prompt = "Contexte projet (résumé compact, ne le cite pas tel quel):\n" + ctx_mod.build_context(conn)
+    sys_prompt = "Contexte projet (résumé compact, ne le cite pas tel quel):\n" + ctx_mod.build_context(conn, max_chars=cfg.ai_context_max_chars)
     messages = [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": question},
@@ -151,7 +151,7 @@ def plan(conn: sqlite3.Connection, title: str, apply: bool = False, home: Path |
     _flag(cfg, "plan", home)
     messages = [
         {"role": "system", "content": PLAN_SYSTEM},
-        {"role": "user", "content": "Contexte:\n" + ctx_mod.build_context(conn) + f"\n\nTâche à découper, titre: {title}"},
+        {"role": "user", "content": "Contexte:\n" + ctx_mod.build_context(conn, max_chars=cfg.ai_context_max_chars) + f"\n\nTâche à découper, titre: {title}"},
     ]
     raw = provider.chat(messages, temperature=0.3)
     raw_subs = _extract_json(raw, home).get("subtasks", [])

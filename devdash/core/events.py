@@ -58,3 +58,20 @@ def since(conn: sqlite3.Connection, last_id: int = 0, limit: int = 500) -> list[
 def last_id(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT COALESCE(MAX(id), 0) AS m FROM events").fetchone()
     return int(row["m"])
+
+
+DEFAULT_PRUNE_KEEP = 10_000
+
+
+def prune(conn: sqlite3.Connection, keep: int = DEFAULT_PRUNE_KEEP) -> int:
+    """Keep only the last `keep` events (the bus is append-only; without this
+    it grows forever). Returns the number of deleted rows. The GUI calls this
+    once at startup; polling uses `since(last_id)` so old events are useless."""
+    if keep < 0:
+        keep = 0
+    cur = conn.execute(
+        "DELETE FROM events WHERE id <= (SELECT COALESCE(MAX(id), 0) - ? FROM events)",
+        (keep,),
+    )
+    conn.commit()
+    return cur.rowcount

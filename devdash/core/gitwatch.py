@@ -144,12 +144,15 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
     _git(p, "rev-parse", "--git-dir")  # raises GitError if not a repo
     branch = _git(p, "rev-parse", "--abbrev-ref", "HEAD").strip() or "HEAD"
 
-    # cheap check: if HEAD did not move since the last sync, skip the full `git log`
+    # cheap check: if HEAD did not move AND the branch is unchanged since the
+    # last sync, skip the full `git log` (a branch switch with the same HEAD
+    # still triggers a sync so the recorded branch stays correct)
     state = conn.execute(
-        "SELECT last_seen_hash FROM git_sync_state WHERE repo_path = ?", (str(p),)
+        "SELECT last_seen_hash, branch FROM git_sync_state WHERE repo_path = ?", (str(p),)
     ).fetchone()
     head = head_hash(p)
-    if state and head and state["last_seen_hash"] == head:
+    if (state and head and state["last_seen_hash"] == head
+            and (state["branch"] or branch) == branch):
         cached = conn.execute(
             "SELECT COUNT(*) AS c FROM git_commits WHERE repo_path = ?", (str(p),)
         ).fetchone()["c"]
