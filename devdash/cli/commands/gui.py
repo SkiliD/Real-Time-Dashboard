@@ -1,4 +1,4 @@
-"""`devdash gui` command (step c): launch the graphical interface."""
+"""`devdash gui` command: launch the graphical interface."""
 
 from __future__ import annotations
 

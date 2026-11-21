@@ -2,7 +2,9 @@
 
 Switching the active project only updates meta.active_project_id: NO data of
 any project is ever touched, so switching focus is instant and lossless.
-Projects are soft-archived (archived=1), never hard-deleted.
+Projects can be soft-archived (archived=1, hidden from the default list) or
+hard-deleted via delete() — an explicit user action only (the GUI asks for
+confirmation); the schema's ON DELETE CASCADE removes all attached rows.
 """
 
 from __future__ import annotations
@@ -144,6 +146,8 @@ def update(
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
     if color is not None:
         color = _validate_color(color)
+    if engine is not None and (not isinstance(engine, str) or len(engine) > 40):
+        raise ValueError("engine must be a string of at most 40 characters")
     fields, values = [], []
     for column, value in (
         ("name", name),
@@ -168,4 +172,38 @@ def update(
     project = get(conn, project.id)
     assert project is not None
     events.append(conn, "project", project.id, "updated", project.to_dict())
+    return project
+
+
+def delete(conn: sqlite3.Connection, ref: int | str) -> Project:
+    """Hard-delete a project and everything attached to it.
+
+    The schema cascades: tasks (and their subtasks), features, sessions,
+    devlog entries and the git LINK go with the project row. Imported git
+    commits and sync state are deliberately KEPT (no FK by design): they are
+    the repo's history, keyed by repo_path, and may still be useful.
+    If the deleted project was the active one, the active pointer is cleared
+    (focus moves to none until the user picks another project).
+    Explicit human action only — never called automatically.
+    """
+    project = get(conn, ref)
+    if project is None:
+        raise KeyError(f"no project matching {ref!r}")
+    with conn:  # one transaction: bus cleanup + row delete + active pointer
+        conn.execute(
+            "DELETE FROM events WHERE entity = 'project' AND entity_id = ?",
+            (project.id,),
+        )
+        conn.execute("DELETE FROM projects WHERE id = ?", (project.id,))
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'active_project_id'"
+        ).fetchone()
+        if row and int(row["value"]) == project.id:
+            conn.execute("DELETE FROM meta WHERE key = 'active_project_id'")
+    events.append(conn, "project", project.id, "deleted",
+                  {"slug": project.slug, "name": project.name})
+    if get_active_id(conn) is None:
+        remaining = list(conn, include_archived=True)
+        if remaining:
+            set_active(conn, remaining[0].id)
     return project

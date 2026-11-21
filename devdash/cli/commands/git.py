@@ -1,4 +1,4 @@
-"""`devdash git ...` commands (step f). READ-ONLY: DevDash never writes to
+"""`devdash git ...` commands. READ-ONLY: DevDash never writes to
 your repository; it only runs `git log` / `git rev-parse`.
 """
 
@@ -32,6 +32,31 @@ def link_cmd(
         raise typer.BadParameter(str(e))
     emit(ctx, {"project": proj.slug, "repo_path": repo},
          lambda: console.print(tr("git.linked", slug=proj.slug, repo=repo)))
+
+
+@app.command("ignore", help=tr("git.ignore.help"))
+def ignore_cmd(
+    ctx: typer.Context,
+    repo: str | None = typer.Option(None, "--repo", help=tr("opt.repo_path")),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """Add/refresh the DevDash block in the .gitignore of the linked repo
+    (idempotent, marker-delimited) so local DevDash data is never committed.
+    This is the only file DevDash ever writes in your repository, only on
+    this explicit command — git history stays untouched (read-only rule)."""
+    from devdash.core import config as cfgmod
+
+    conn = get_conn(ctx)
+    proj = resolve_project(conn, project)
+    target = repo or gitwatch.get_link(conn, proj.id)
+    if not target:
+        raise typer.BadParameter(tr("err.no_linked_repo", slug=proj.slug))
+    result = guard(gitwatch.ensure_gitignore, target, home=cfgmod.devdash_home())
+    result["project"] = proj.slug
+    emit(ctx, result, lambda: console.print(
+        tr("git.ignore.already" if not result["updated"] else "git.ignore.done",
+           path=result["path"], n=result["lines"])
+    ))
 
 
 @app.command("unlink", help=tr("git.unlink.help"))

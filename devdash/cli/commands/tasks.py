@@ -1,4 +1,4 @@
-"""`devdash task ...` commands (step b)."""
+"""`devdash task ...` commands."""
 
 from __future__ import annotations
 
@@ -175,11 +175,22 @@ def edit_task(
     est: int | None = typer.Option(None, "--est", "--estimate"),
     tag: list[str] = typer.Option([], "--tag", "-t", help=tr("opt.replace_tags")),
 ) -> None:
-    """Edit a task's fields."""
+    """Edit a task's fields (only the options you pass are changed)."""
     conn = get_conn(ctx)
-    task = guard(core.update, conn, task_id, title=title, description=description,
-                 priority=priority, estimate_min=est,
-                 tags=tag if tag else None)
+    # pass ONLY the options actually provided: core.update treats an explicit
+    # None on a NOT NULL column as an error, and unset options as "no change"
+    changes: dict = {}
+    if title is not None:
+        changes["title"] = title
+    if description is not None:
+        changes["description"] = description
+    if priority is not None:
+        changes["priority"] = priority
+    if est is not None:
+        changes["estimate_min"] = est
+    if tag:
+        changes["tags"] = tag
+    task = guard(core.update, conn, task_id, **changes)
     emit(ctx, task.to_dict(), lambda: console.print(
         tr("task.updated", id=task.id, title=task.title)
     ))

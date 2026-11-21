@@ -1,4 +1,4 @@
-"""Security + AI-provider flexibility tests (post-review round 2).
+"""Security + AI-provider flexibility tests.
 
 Security: no API key leakage (status/events/errors), Host+Origin enforcement
 on mutating routes, ReDoS cap on commit-message parsing, DB file perms,

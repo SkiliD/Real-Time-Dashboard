@@ -1,4 +1,4 @@
-"""Demo data seeding (step k): `devdash demo seed`.
+"""Demo data seeding: `devdash demo seed`.
 
 Fills a fresh install with plausible sample data (2 projects, tasks, a feature,
 sessions and devlog entries spread over the last week) so the CLI and GUI can

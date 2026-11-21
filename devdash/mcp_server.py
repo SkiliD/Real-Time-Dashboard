@@ -30,6 +30,24 @@ from .core import tasks as tsk
 
 PROTOCOL_VERSION = "2024-11-05"
 
+# input bounds for tool arguments (defense in depth on top of the JSON schema)
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 500
+MAX_SEARCH_LIMIT = 200
+
+# one DB connection per stdio process (the loop is single-threaded)
+_CONN = None
+_CONN_HOME = None
+
+
+def _int_arg(args: dict, key: str, default: int, lo: int, hi: int) -> int:
+    """Coerce an optional integer argument and clamp it into [lo, hi]."""
+    raw = args.get(key)
+    if raw is None:
+        return default
+    n = int(raw)  # ValueError -> clean isError response by the caller
+    return max(lo, min(hi, n))
+
 
 def _tool(name: str, description: str, properties: dict | None = None,
           required: list[str] | None = None) -> dict:
@@ -76,10 +94,15 @@ TOOLS = [
 
 
 def _conn(home: Path | None):
+    """One cached connection per stdio process (the loop is single-threaded);
+    re-opened only if the home changes. Never closed between calls."""
+    global _CONN, _CONN_HOME
     h = home or cfgmod.devdash_home()
-    conn = db.connect(cfgmod.db_path(h))
-    db.init_db(conn)
-    return conn
+    if _CONN is None or _CONN_HOME != h:
+        _CONN = db.connect(cfgmod.db_path(h))
+        db.init_db(_CONN)
+        _CONN_HOME = h
+    return _CONN
 
 
 def _call(name: str, args: dict, home: Path | None) -> dict:
@@ -116,9 +139,14 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
                 proj = projects.get(conn, args["project"]) or proj
             if proj is None:
                 raise KeyError("no active project")
+            est = args.get("estimate_min")
+            if est is not None:
+                est = int(est)  # ValueError on garbage -> clean isError
+                if est < 0:
+                    raise ValueError("estimate_min must be >= 0")
             t = tsk.add(conn, proj.id, args["title"],
                         priority=args.get("priority", "medium"),
-                        estimate_min=args.get("estimate_min"),
+                        estimate_min=est,
                         tags=args.get("tags") or [])
             return t.to_dict()
         if name == "devdash_task_set_status":
@@ -140,7 +168,8 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
                          tags=args.get("tags") or [])
             return e.to_dict()
         if name == "devdash_log_search":
-            rows = logs.search(conn, args["query"], limit=int(args.get("limit", 20)))
+            rows = logs.search(conn, args["query"],
+                               limit=_int_arg(args, "limit", 20, 1, MAX_SEARCH_LIMIT))
             return {"count": len(rows), "entries": [x.to_dict() for x in rows]}
         if name == "devdash_stats":
             proj = projects.get_active(conn)
@@ -148,8 +177,7 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
             period = args.get("period", "today")
             if period == "today":
                 return {"today_minutes": stats.today_minutes(conn, pid),
-                        "tasks_done_today": sum(1 for t in tsk.list(conn, project_id=pid, status="done")
-                                                if (t.completed_at or "")[:10] == stats.today_str()),
+                        "tasks_done_today": stats.tasks_done_today(conn, pid),
                         "streak_days": stats.streak_days(conn, pid)}
             if period == "week":
                 return {"minutes_week": stats.period_minutes(conn, pid, 7),
@@ -166,9 +194,10 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
             return gitwatch.status(conn, proj.id)
         if name == "devdash_git_log":
             proj = projects.get_active(conn)
+            task_id = args.get("task_id")
             rows = gitwatch.commits(conn, project_id=proj.id if proj else None,
-                                    task_id=args.get("task_id"),
-                                    limit=int(args.get("limit", 50)))
+                                    task_id=int(task_id) if task_id is not None else None,
+                                    limit=_int_arg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT))
             return {"count": len(rows), "commits": [c.to_dict() for c in rows]}
         if name == "devdash_features_list":
             proj = projects.get_active(conn)
@@ -182,11 +211,15 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
                 raise AIError(str(e)) from e
         raise KeyError(f"unknown tool {name!r}")
     finally:
-        conn.close()
+        pass  # cached process-wide connection: do NOT close between calls
 
 
-def handle_request(req: dict, home: Path | None) -> dict | None:
-    """One JSON-RPC request -> response dict, or None for notifications."""
+def handle_request(req, home: Path | None) -> dict | None:
+    """One JSON-RPC request -> response dict, or None for notifications.
+    `req` may be ANY JSON value (a batch array, a string…): never crash on it."""
+    if not isinstance(req, dict):
+        return {"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "invalid request: expected a JSON object"}}
     method = req.get("method", "")
     rid = req.get("id")
     if rid is None:  # notification (e.g. notifications/initialized): no response
@@ -233,7 +266,11 @@ def serve(home: Path | None = None) -> None:
             resp = {"jsonrpc": "2.0", "id": None,
                     "error": {"code": -32700, "message": "parse error"}}
         else:
-            resp = handle_request(req, home)
+            try:
+                resp = handle_request(req, home)
+            except Exception as e:  # a malformed request must NEVER kill the server
+                resp = {"jsonrpc": "2.0", "id": None,
+                        "error": {"code": -32603, "message": f"internal error: {type(e).__name__}"}}
         if resp is not None:
             sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
             sys.stdout.flush()

@@ -1,4 +1,4 @@
-"""Core session tests (step d): start/stop, auto-stop, current, history,
+"""Core session tests: start/stop, auto-stop, current, history,
 durations, events, planned_min migration.
 """
 

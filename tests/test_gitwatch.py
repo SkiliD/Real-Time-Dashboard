@@ -1,4 +1,4 @@
-"""Git integration tests (step f): real temporary git repo, read-only sync,
+"""Git integration tests: real temporary git repo, read-only sync,
 commit parsing (#id / feat(name)), task links, status, events, idempotence.
 """
 

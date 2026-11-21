@@ -1,4 +1,4 @@
-"""Stats tests (step j): by_tag, period_minutes, CLI stats commands, /api/stats."""
+"""Stats tests: by_tag, period_minutes, CLI stats commands, /api/stats."""
 
 from __future__ import annotations
 

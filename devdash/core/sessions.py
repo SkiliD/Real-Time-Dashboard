@@ -72,19 +72,26 @@ def start(
     now = now_iso()
     # Atomic: stop ANY still-running sessions (normally at most one) and insert
     # the new one in a single transaction — a crash can never leave two running.
+    # Auto-stopped sessions emit their own "stopped" event so live GUIs see it.
     with conn:
+        stale = conn.execute(
+            "SELECT id FROM sessions WHERE ended_at IS NULL"
+        ).fetchall()
         conn.execute(
             "UPDATE sessions SET ended_at = ?, "
             "duration_min = MAX(0, ROUND((julianday(?) - julianday(started_at)) * 24 * 60, 2)) "
             "WHERE ended_at IS NULL",
             (now, now),
         )
+        for row in stale:
+            events.append(conn, "session", row["id"], "stopped", None, commit=False)
         cur = conn.execute(
             "INSERT INTO sessions(project_id, task_id, kind, started_at, ended_at, "
             "duration_min, planned_min, note) VALUES (?, ?, ?, ?, NULL, NULL, ?, '')",
             (project_id, task_id, kind, now, minutes),
         )
         session_id = cur.lastrowid
+        events.append(conn, "session", session_id, "started", None, commit=False)
     session = get(conn, session_id)
     assert session is not None
     events.append(conn, "session", session.id, "started", session.to_dict())

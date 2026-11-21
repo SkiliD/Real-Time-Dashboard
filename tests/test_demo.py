@@ -1,4 +1,4 @@
-"""Demo seed tests (step k): core seeding + `devdash demo seed` CLI."""
+"""Demo seed tests: core seeding + `devdash demo seed` CLI."""
 
 from __future__ import annotations
 

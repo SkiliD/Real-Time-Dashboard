@@ -1,9 +1,8 @@
 # DevDash — référence technique détaillée
 
 > Version longue et technique. Pour la version courte et lisible : [README.md](../README.md) (anglais) / [README.fr.md](../README.fr.md) (français).
-
-
->🇫🇷 Version française du README. La version principale (anglais) est dans [README.md](README.md).
+>
+> 🇬🇧 English version of this detailed reference: [README.detail.en.md](README.detail.en.md). The main (short) README is [README.md](../README.md).
 
 
 > Dashboard de suivi de dev **100 % local et portable**, pour développeur solo
@@ -119,7 +118,10 @@ et un watcher Git scanne les dépôts liés toutes les `git_watch_interval_sec`
 
 Onglets : **Tâches** (kanban), **Devlog**, **Git**, **Features**, **Stats**
 (graphiques Chart.js embarqués), **Assistant IA** (visible uniquement si l'IA
-est activée).
+est activée), **Réglages** (toujours visible : provider IA local ou cloud +
+test de connexion + fonctions actives, mais aussi langue de l'interface,
+Pomodoro, intervalle du watcher Git, port de la GUI, patterns de commits,
+et bouton de sauvegarde zip).
 
 ## 4. Référence CLI
 
@@ -130,8 +132,9 @@ la commande) pour une sortie machine.
 |---|---|---|
 | `projects list` | `devdash projects list` | liste, `*` = actif |
 | `projects create` | `devdash projects create "Aether Vale" --engine unity --status development --color #7c5cff --set-active` | `--engine`, `--status`, `--color`, `--description`, `--set-active` |
+| `projects connect <path>` | `devdash projects connect "C:\jeux\aether-vale" --set-active` | **connecte un dossier existant** : moteur auto-détecté (`ProjectSettings/ProjectVersion.txt` → unity, `*.uproject` → unreal, `project.godot` → godot, `package.json` → web), nom suggéré depuis le dossier, racine git trouvée en remontant l'arborescence et **auto-liée en lecture seule** (commits importés immédiatement) ; `--no-git` pour refuser, `--engine` pour forcer |
 | `projects set-active <ref>` | `devdash projects set-active aether-vale` | **sans perte** : simple pointeur, les autres projets gardent tout |
-| `projects show/update/archive` | `devdash projects show aether-vale` | détail, édition, archivage (jamais de suppression dure) |
+| `projects show/update/archive` | `devdash projects show aether-vale` | détail, édition, archivage. **Suppression dure** : possible depuis la GUI (sidebar ✎ → Supprimer, confirmation en 2 clics) via `POST /api/projects/delete` — cascade complète (tâches, sessions, devlog, commits liés), le projet actif est réassigné |
 | `task add` | `devdash task add "Dash" -p high -t gameplay -t combat --est 90` | `-p` projet (défaut: actif), `--parent` sous-tâche |
 | `task list` | `devdash task list -s todo --priority high --tag ui --feature dash` | filtres statut/priorité/tag/feature |
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | changement de statut |
@@ -145,6 +148,7 @@ la commande) pour une sortie machine.
 | `git sync` | `devdash git sync` | importe les nouveaux commits (tous projets si `-p` omis) |
 | `git log` | `devdash git log --task 3` | commits liés à une tâche (`--unparsed` = non reconnus) |
 | `git status` | `devdash git status` | branche, dernier commit, commits/jour |
+| `git ignore` | `devdash git ignore [--repo <path>]` | écrit/rafraîchit le **bloc balisé** `# >>> devdash >>>` dans le `.gitignore` du dépôt lié : `.devdash/`, `devdash.db*`, snapshots, `devdash-backup-*.zip`, `devdash-export-*.json`, et `<home>/config.json` si `DEVDASH_HOME` est dans le dépôt (clés API). Idempotent (jamais dupliqué), contenu existant préservé. **Seul fichier que DevDash écrit dans votre dépôt, et seulement sur cette commande explicite** — l'historique git reste intouché |
 | `feature add/link/done` | `devdash feature add dash` ; `devdash feature link dash 3 4` ; `devdash feature done dash` | **validation manuelle** d'une feature |
 | `feature approve/reject` | `devdash feature reject dash --feedback "pas assez testé"` | approuver/rejeter une proposition (le rejet est mémorisé) |
 | `status` | `devdash status` ; `devdash status --watch` | instantané temps réel (tâches, session, streak, git) |
@@ -160,7 +164,8 @@ la commande) pour une sortie machine.
 | `import` | `devdash import export.json [--force]` | restaure un export JSON dans la base (refusé si la base n’est pas vide, sauf `--force`) |
 | `mcp` | `devdash mcp` | serveur **MCP** (JSON-RPC stdio) pour connecter DevDash à un agent IA externe |
 | `gui` | `devdash gui` | fenêtre graphique native |
-| `version` | `devdash version` | version |
+| `version` | `devdash version` | version + hash git du checkout |
+| `update` | `devdash update [--check] [--no-reinstall]` · `update check` · `update status` | **auto-mise à jour** : install git → `git pull --ff-only` (jamais de force, refus si arbre sale) + `pip install -e .` pour rafraîchir les dépendances ; install pip/pipx → affiche la bonne commande ; exécutable → rebuild. `restart_needed` retourné. GUI : carte « Mise à jour » dans Réglages (`GET /api/update/status`, `POST /api/update/check`, `POST /api/update`) |
 
 ### Conventions de commits Git
 
@@ -286,9 +291,17 @@ Toutes les données tiennent dans **un seul dossier** :
 
 Désactivé par défaut (`ai_enabled = false`) : l'outil est **entièrement
 fonctionnel** sans IA, et tout ce qui touche à l'IA disparaît du CLI et de la
-GUI. Chaque fonction est activable individuellement via `ai_feature_flags`.
+GUI (seul l'onglet **Réglages** reste visible pour configurer l'IA).
+Chaque fonction est activable individuellement via `ai_feature_flags`.
 
-`~/.devdash/config.json` (créé à la main ; `chmod 600` automatique à l'écriture) :
+**Depuis la GUI** : onglet ⚙ Réglages → choisir le provider dans la liste
+(local ou cloud), remplir modèle / URL / clé API / commande CLI, cocher les
+fonctions actives, puis **Tester la connexion** (envoi d'un simple « OK »,
+jamais de contexte projet) et **Enregistrer**. La clé saisie n'est jamais
+renvoyée au client (champ en écriture seule : laisser vide = garder la clé
+enregistrée).
+
+**À la main** : `~/.devdash/config.json` (créé à la main ; `chmod 600` automatique à l'écriture) :
 
 ```json
 {

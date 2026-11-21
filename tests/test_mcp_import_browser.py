@@ -1,4 +1,4 @@
-"""Tests for the last batch: MCP server (real stdio JSON-RPC subprocess),
+"""Tests for the MCP server (real stdio JSON-RPC subprocess),
 `devdash import`, and GUI browser-level tests (Playwright when available,
 plus an always-on HTTP flow that mimics a browser session)."""
 

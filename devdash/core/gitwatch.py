@@ -58,6 +58,64 @@ def is_repo(path) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# .gitignore management: DevDash must never pollute the USER's project repo.
+# The block is marker-delimited so re-running replaces it instead of duplicating.
+# ---------------------------------------------------------------------------
+
+IGNORE_BEGIN = "# >>> devdash >>>"
+IGNORE_END = "# <<< devdash <<<"
+
+#: lines always ignored (DevDash data/artifacts, wherever they land in the repo)
+IGNORE_LINES = [
+    ".devdash/",
+    "devdash.db",
+    "devdash.db-shm",
+    "devdash.db-wal",
+    ".devdash-snapshot-*.db",
+    "devdash-backup-*.zip",
+    "devdash-export-*.json",
+]
+
+
+def gitignore_block(home: Path | None = None, repo: Path | None = None) -> list[str]:
+    """The marker-delimited .gitignore block. If DEVDASH_HOME lives inside the
+    repo, its config.json (API keys!) is ignored by its repo-relative path."""
+    lines = list(IGNORE_LINES)
+    if home is not None and repo is not None:
+        try:
+            rel = (home.resolve() / "config.json").relative_to(repo.resolve())
+            lines.append(str(rel).replace("\\", "/"))
+        except (ValueError, OSError):
+            pass  # home outside the repo: nothing extra to ignore
+    return [IGNORE_BEGIN, "# DevDash local data — never commit these"] + lines + [IGNORE_END]
+
+
+def ensure_gitignore(repo_path: str | Path, home: Path | None = None) -> dict:
+    """Idempotently add/refresh the DevDash block in <repo>/.gitignore.
+
+    This is the ONLY file DevDash ever writes inside a user's repository, and
+    only on explicit request (`devdash git ignore` / GUI button) — it touches
+    no git history (read-only rule preserved). Returns what happened."""
+    repo = Path(repo_path).expanduser().resolve()
+    if not is_repo(repo):
+        raise GitError(f"not a git repository: {repo}")
+    gi = repo / ".gitignore"
+    block = gitignore_block(home=home, repo=repo)
+    text = gi.read_text(encoding="utf-8") if gi.exists() else ""
+    # drop any previous marked block (regex with DOTALL between the markers)
+    cleaned = re.sub(
+        re.escape(IGNORE_BEGIN) + r".*?" + re.escape(IGNORE_END) + r"\n?",
+        "", text, flags=re.DOTALL,
+    ).rstrip("\n")
+    new_text = (cleaned + "\n\n" if cleaned else "") + "\n".join(block) + "\n"
+    if gi.exists() and text == new_text:
+        return {"updated": False, "path": str(gi), "lines": len(block),
+                "already_present": True}
+    gi.write_text(new_text, encoding="utf-8")
+    return {"updated": True, "path": str(gi), "lines": len(block)}
+
+
 def head_hash(repo_path) -> str | None:
     """Current HEAD commit hash, or None if unavailable. Used by the watcher to
     skip the (expensive) full `git log` when nothing changed."""

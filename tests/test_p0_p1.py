@@ -1,4 +1,4 @@
-"""Tests for the P0/P1 batch: stats window coherence, event pruning, GUI error
+"""Tests for stats window coherence, event pruning, GUI error
 toast presence, task --feature filter, backup command, ai_context_max_chars,
 pomodoro auto-break."""
 

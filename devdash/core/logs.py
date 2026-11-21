@@ -111,3 +111,15 @@ def update(
     assert entry is not None
     events.append(conn, "log", entry.id, "updated", entry.to_dict())
     return entry
+
+
+def delete(conn: sqlite3.Connection, entry_id: int) -> LogEntry:
+    """Delete a devlog entry (explicit user action; GUI confirms first)."""
+    entry = get(conn, entry_id)
+    if entry is None:
+        raise KeyError(f"no log entry #{entry_id}")
+    with conn:  # one transaction: bus cleanup + row delete
+        conn.execute("DELETE FROM events WHERE entity = 'log' AND entity_id = ?", (entry.id,))
+        conn.execute("DELETE FROM log_entries WHERE id = ?", (entry.id,))
+    events.append(conn, "log", entry.id, "deleted", {"id": entry.id})
+    return entry

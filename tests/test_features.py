@@ -1,4 +1,4 @@
-"""Feature tests (step h): grouping, progress, and the ABSOLUTE RULE —
+"""Feature tests: grouping, progress, and the ABSOLUTE RULE —
 a feature becomes 'done' only via an explicit human decision; check_completion
 is a signal and never mutates status. Rejected proposals keep feedback.
 """
@@ -74,7 +74,7 @@ def test_propose_approve_reject_flow(conn, project):
     features.attach(conn, f.id, t.id)
     tasks.done(conn, t.id)
 
-    # AI-style proposal (step i will call this) — never done
+    # AI-style proposal — never done
     f = features.propose(conn, "walljump", confidence=0.85, reasoning="tâche faite + commits feat(walljump)")
     assert f.status == "proposed" and f.confidence == 0.85 and f.source == "ai"
 

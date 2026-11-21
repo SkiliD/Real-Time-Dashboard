@@ -1,4 +1,4 @@
-"""Tests for the P2/P3 batch: JS syntax check (node), GUI toast e2e over HTTP,
+"""Tests for JS syntax check (node), GUI toast e2e over HTTP,
 git re-sync on branch change (same HEAD), and `devdash export` JSON."""
 
 from __future__ import annotations

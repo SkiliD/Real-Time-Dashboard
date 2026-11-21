@@ -53,14 +53,21 @@ class Api:
 
     # --- input helpers: bad client input is a 400, never a 500 -------------
 
+    # list endpoints never return more than this many rows (SQLite LIMIT -1
+    # would mean "unlimited" — a client must not be able to ask for that)
+    MAX_LIST_LIMIT = 1000
+
     @staticmethod
-    def _int(value, what: str, default=None):
+    def _int(value, what: str, default=None, hi: int | None = None):
         if value is None or value == "":
             return default
         try:
-            return int(value)
+            n = int(value)
         except (TypeError, ValueError):
             raise ApiError(f"invalid {what}: {value!r} (expected an integer)")
+        if hi is not None:
+            n = max(1, min(hi, n))
+        return n
 
     def _list_pid(self, c, query: dict) -> int | None:
         """Scope for list endpoints: explicit project=... wins; 'all'/'*' means
@@ -128,6 +135,63 @@ class Api:
                 raise ApiError(str(e))
             return p.to_dict()
 
+    def detect_path(self, query: dict) -> dict:
+        """Probe an existing folder: engine markers, suggested name, git root.
+        Read-only filesystem probing; bounded input."""
+        from devdash.core import detect
+        path = query.get("path") or ""
+        if len(path) > 4096:
+            raise ApiError("path too long")
+        return detect.detect_project(path)
+
+    def projects_connect(self, body: dict) -> dict:
+        """Connect an EXISTING project folder: create the DevDash project with
+        auto-detected engine/name, and auto-link the enclosing git repo
+        (read-only) unless no_git is set."""
+        from devdash.core import config as _cfg, detect, gitwatch
+        path = (body.get("path") or "").strip()
+        if not path:
+            raise ApiError("path is required")
+        info = detect.detect_project(path)
+        if not info["is_dir"]:
+            raise ApiError(f"not a directory: {path}")
+        with self._conn() as c:
+            engine = (body.get("engine") or info["engine"] or "other").lower()
+            try:
+                p = proj.create(
+                    c, (body.get("name") or "").strip() or info["name"] or info["path"],
+                    description=body.get("description", ""),
+                    engine=engine,
+                    color=body.get("color") or "#8a8f98",
+                    status=body.get("status") or "idea",
+                )
+            except ValueError as e:
+                raise ApiError(str(e))
+            if body.get("set_active"):
+                proj.set_active(c, p.id)
+            git_root = None
+            if not body.get("no_git") and info["git_root"]:
+                try:
+                    git_root = gitwatch.link(c, p.id, info["git_root"])
+                    gitwatch.sync_repo(c, git_root, _cfg.load_config(self.home).commit_patterns)
+                except gitwatch.GitError as e:
+                    git_root = None  # link failed: report it, don't fail the connect
+                    info["git_error"] = str(e)
+            return {"project": p.to_dict(), "detected": info, "git_root": git_root}
+
+    def projects_delete(self, body: dict) -> dict:
+        """Hard delete (explicit user action; the GUI confirms first)."""
+        ref = body.get("ref")
+        if ref is None:
+            raise ApiError("missing 'ref'")
+        with self._conn() as c:
+            try:
+                p = proj.delete(c, int(ref) if str(ref).isdigit() else str(ref))
+            except KeyError:
+                raise ApiError(f"no project matching {ref!r}", status=404)
+            active = proj.get_active(c)
+            return {"deleted": p.slug, "active": active.slug if active else None}
+
     # --- tasks ------------------------------------------------------------
 
     def _resolve_project(self, c, ref):
@@ -150,9 +214,41 @@ class Api:
                 c, project_id=pid, status=statuses,
                 priority=query.get("priority") or None,
                 tag=query.get("tag") or None,
+                feature_id=self._int(query.get("feature"), "feature"),
                 include_cancelled=query.get("all") in ("1", "true", "yes"),
+                q=query.get("q") or None,
             )
             return {"count": len(result), "tasks": [t.to_dict() for t in result]}
+
+    def tasks_update(self, body: dict) -> dict:
+        """Edit a task's fields. Only keys present in the body are changed;
+        explicit null clears parent_id / feature_id (set to NULL)."""
+        tid = self._int(body.get("id"), "id")
+        if tid is None:
+            raise ApiError("id is required")
+        kwargs = {}
+        for key in ("title", "description", "priority"):  # status changes go through /api/tasks/status
+            if key in body:
+                kwargs[key] = body[key]
+        if "estimate_min" in body:
+            kwargs["estimate_min"] = self._int(body["estimate_min"], "estimate_min")
+        if "tags" in body:
+            tags = body["tags"]
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                raise ApiError("tags must be a list of strings")
+            kwargs["tags"] = tags
+        if "parent_id" in body:
+            kwargs["parent_id"] = self._int(body["parent_id"], "parent_id")  # None clears
+        if "feature_id" in body:
+            kwargs["feature_id"] = self._int(body["feature_id"], "feature_id")
+        with self._conn() as c:
+            try:
+                t = tsk.update(c, tid, **kwargs)
+            except KeyError:
+                raise ApiError(f"no task #{tid}", status=404)
+            except ValueError as e:
+                raise ApiError(str(e))
+            return t.to_dict()
 
     def tasks_add(self, body: dict) -> dict:
         title = body.get("title", "").strip()
@@ -188,26 +284,41 @@ class Api:
                 raise ApiError(str(e))
             return t.to_dict()
 
-    # --- stats (step j) --------------------------------------------------------
+    # --- stats --------------------------------------------------------
 
     def stats_overview(self, query: dict) -> dict:
         with self._conn() as c:
             project = query.get("project")
-            if project:
+            explicit_all = project in ("all", "*")
+            if explicit_all:
+                pid = None  # aggregate across ALL projects
+            elif project:
                 pid = self._resolve_project(c, project).id
             else:
                 active = proj.get_active(c)
                 pid = active.id if active else None
             days = self._int(query.get("days"), "days", 14)
-            if pid is None:
-                return {"project": None, "time_by_day": [], "tasks_done_by_day": [],
+            if days is None or not (1 <= days <= 365):
+                raise ApiError("days must be between 1 and 365")
+            group = (query.get("group") or "day").lower()
+            if group not in ("day", "week", "month"):
+                raise ApiError("group must be day, week or month")
+            if pid is None and not explicit_all:
+                return {"project": None, "group": group, "days": days, "time_by_day": [],
+                        "tasks_done_by_day": [], "by_project": stats.minutes_by_project(c, days),
                         "minutes": {"today": 0, "week": 0, "month": 0, "all": 0},
                         "streak_days": 0, "progress": None, "by_tag": [], "tasks": {"open": 0, "done": 0}}
             all_tasks = tsk.list(c, project_id=pid, include_cancelled=False)
+            time_rows = stats.time_by_day(c, pid, days)
+            done_rows = stats.tasks_done_by_day(c, pid, days)
             return {
                 "project": pid,
-                "time_by_day": stats.time_by_day(c, pid, days),
-                "tasks_done_by_day": stats.tasks_done_by_day(c, pid, days),  # same window as time_by_day
+                "group": group,
+                "days": days,
+                # regrouped in place when group != day: same keys, label in "date"
+                "time_by_day": stats.regroup_rows(time_rows, group, "minutes"),
+                "tasks_done_by_day": stats.regroup_rows(done_rows, group, "count"),
+                "by_project": stats.minutes_by_project(c, days),
                 "minutes": {
                     "today": stats.today_minutes(c, pid),
                     "week": stats.period_minutes(c, pid, 7),
@@ -215,7 +326,7 @@ class Api:
                     "all": stats.period_minutes(c, pid, 3650),
                 },
                 "streak_days": stats.streak_days(c, pid),
-                "progress": stats.project_progress(c, pid),
+                "progress": stats.project_progress(c, pid) if pid is not None else None,
                 "by_tag": stats.by_tag(c, pid),
                 "tasks": {
                     "open": sum(1 for t in all_tasks if t.status in ("todo", "in_progress")),
@@ -223,7 +334,7 @@ class Api:
                 },
             }
 
-    # --- AI assistant (step i, optional) --------------------------------------
+    # --- AI assistant --------------------------------------
 
     def ai_status(self) -> dict:
         from devdash.core.ai import ai_status as _ai_status
@@ -234,6 +345,167 @@ class Api:
         Purely local read — works with the AI disabled."""
         with self._conn() as c:
             return assistant.context_preview(c, home=self.home)
+
+    # --- AI configuration from the GUI (settings tab) ----------------------
+
+    def ai_providers(self) -> dict:
+        from devdash.core.ai import provider_catalog
+        return {"providers": provider_catalog()}
+
+    def ai_config_get(self) -> dict:
+        """Current AI settings. The API key is write-only: the response says
+        whether one is set, never its value."""
+        from devdash.core.ai import public_ai_config
+        return public_ai_config(config.load_config(self.home), home=self.home)
+
+    def ai_config_save(self, body: dict) -> dict:
+        from devdash.core.ai import apply_ai_settings, public_ai_config
+        cfg = config.load_config(self.home)
+        try:
+            apply_ai_settings(cfg, body)
+        except ValueError as e:
+            raise ApiError(str(e))  # validation messages never contain the key
+        config.save_config(cfg, self.home)  # chmod 600: may hold an API key
+        return {"saved": True, "config": public_ai_config(cfg, home=self.home),
+                "status": self.ai_status()}
+
+    # --- general settings (GUI settings tab, beyond AI) --------------------
+
+    def settings_get(self) -> dict:
+        """Full public settings: AI block (key write-only) + general block."""
+        from devdash.core import i18n
+        from devdash.core.ai import public_ai_config
+        cfg = config.load_config(self.home)
+        home = self.home or config.devdash_home()
+        return {
+            "home": str(home),
+            "ai": public_ai_config(cfg, home=home),
+            "general": {
+                "lang": i18n.get_lang(home),
+                "langs": list(i18n.SUPPORTED_LANGS),
+                "pomodoro_focus_min": cfg.pomodoro_focus_min,
+                "pomodoro_break_min": cfg.pomodoro_break_min,
+                "git_watch_interval_sec": cfg.git_watch_interval_sec,
+                "gui_port": cfg.gui_port,
+                "commit_patterns": list(cfg.commit_patterns),
+            },
+        }
+
+    def settings_save(self, body: dict) -> dict:
+        """Save general + AI settings in one shot (the settings tab form)."""
+        from devdash.core import i18n
+        from devdash.core.ai import apply_ai_settings, public_ai_config
+        cfg = config.load_config(self.home)
+        try:
+            config.apply_general_settings(cfg, body or {}, allowed_langs=i18n.SUPPORTED_LANGS)
+            apply_ai_settings(cfg, body or {})
+        except ValueError as e:
+            raise ApiError(str(e))  # validation messages never contain the key
+        config.save_config(cfg, self.home)
+        home = self.home or config.devdash_home()
+        return {"saved": True, "settings": {
+            "home": str(home),
+            "ai": public_ai_config(cfg, home=home),
+            "general": {
+                "lang": i18n.get_lang(home),
+                "langs": list(i18n.SUPPORTED_LANGS),
+                "pomodoro_focus_min": cfg.pomodoro_focus_min,
+                "pomodoro_break_min": cfg.pomodoro_break_min,
+                "git_watch_interval_sec": cfg.git_watch_interval_sec,
+                "gui_port": cfg.gui_port,
+                "commit_patterns": list(cfg.commit_patterns),
+            },
+        }, "status": self.ai_status()}
+
+    def _confined_out(self, body: dict | None, default_subdir: str):
+        """Resolve the optional `out` path from a POST body. The file may only
+        be written INSIDE DEVDASH_HOME — this endpoint is a local write
+        primitive and must not become an arbitrary-path write."""
+        home = Path(self.home or config.devdash_home()).resolve()
+        raw = (body or {}).get("out")
+        if not raw:
+            return home / default_subdir
+        out = Path(raw).expanduser().resolve()
+        if not out.is_relative_to(home):
+            raise ApiError(f"out must be inside DEVDASH_HOME ({home})", status=400)
+        return out
+
+    def backup_now(self, body: dict) -> dict:
+        """One-click backup from the GUI: timestamped zip of the whole home.
+        Default destination is <DEVDASH_HOME>/backups (never the cwd)."""
+        from devdash.core.backup import make_backup
+        home = self.home or config.devdash_home()
+        try:
+            return make_backup(home=home, out_dir=self._confined_out(body, "backups"))
+        except OSError as e:
+            raise ApiError(f"backup failed: {e}")
+
+    def export_now(self, body: dict) -> dict:
+        """One-click JSON export from the GUI (read-only)."""
+        from devdash.core.backup import export_json
+        home = self.home or config.devdash_home()
+        try:
+            return export_json(home=home, out_dir=self._confined_out(body, "exports"))
+        except OSError as e:
+            raise ApiError(f"export failed: {e}")
+
+    # --- self-update ---------------------------------------------------------
+
+    def update_status(self) -> dict:
+        """Version + install mode + local git info. Read-only, no network."""
+        from devdash import __version__
+        from devdash.core import updater
+        return {"version": __version__, **updater.git_status()}
+
+    def update_check(self, body: dict | None = None) -> dict:
+        """git fetch + compare with upstream (network, read-only on the tree)."""
+        from devdash.core import updater
+        return updater.check_for_updates()
+
+    def update_now(self, body: dict) -> dict:
+        """Apply the update: git pull --ff-only + pip install -e . (git mode).
+        Aborts on a dirty tree. Mutating route: Host/Origin guards apply, AND
+        it requires an explicit confirm=true (the GUI arms the button first,
+        same two-step pattern as delete/demo)."""
+        from devdash.core import updater
+        if not (body or {}).get("confirm"):
+            raise ApiError("update requires confirm=true (two-step in the GUI)", status=400)
+        return updater.update(reinstall=bool((body or {}).get("reinstall", True)))
+
+    def demo_seed(self, body: dict) -> dict:
+        """Seed demo data from the GUI. Refuses when projects already exist
+        unless force=true (same rule as `devdash demo seed --force`)."""
+        from devdash.core import demo as demo_core
+        with self._conn() as c:
+            if proj.list(c, include_archived=True) and not body.get("force"):
+                raise ApiError("projects already exist — pass force=true to add demo data anyway")
+            return demo_core.seed(c)
+
+    def ai_config_test(self, body: dict) -> dict:
+        """Dry-run a connection with the given (not yet saved) settings.
+        Sends only a tiny fixed prompt — never project context — so testing a
+        cloud provider leaks nothing. The API key is scrubbed from errors."""
+        from devdash.core.ai import apply_ai_settings, get_provider, is_cloud
+        cfg = config.load_config(self.home)
+        try:
+            apply_ai_settings(cfg, body or {})
+        except ValueError as e:
+            raise ApiError(str(e))
+        if not cfg.ai_enabled:
+            raise ApiError("enable the AI first (ai_enabled) to test the connection")
+        provider = get_provider(cfg)
+        if provider is None:
+            raise ApiError("AI is disabled")
+        try:
+            reply = provider.chat([{"role": "user", "content": "Reply with exactly: OK"}],
+                                  temperature=0.0)
+        except Exception as e:  # AIError or network error: scrub the key, then 400
+            msg = str(e)
+            if cfg.ai_api_key:
+                msg = msg.replace(cfg.ai_api_key, "***")
+            raise ApiError(f"connection failed: {msg[:300]}")
+        return {"ok": True, "provider": cfg.ai_provider, "model": cfg.ai_model,
+                "cloud": is_cloud(cfg), "reply": (reply or "")[:200]}
 
     def _ai_call(self, fn, *args, **kwargs):
         from devdash.core.ai.provider import AIDisabledError, AIError
@@ -265,7 +537,7 @@ class Api:
             raise ApiError("ref is required")
         return self._ai_call(assistant.feature_verdict, ref)
 
-    # --- features (step h) ---------------------------------------------------
+    # --- features ---------------------------------------------------
 
     def features_list(self, query: dict) -> dict:
         with self._conn() as c:
@@ -333,6 +605,18 @@ class Api:
             f = feats.reopen(c, f.id)
             return f.to_dict()
 
+    def features_detach(self, body: dict) -> dict:
+        with self._conn() as c:
+            p, f = self._feature_ref(c, body)
+            tid = self._int(body.get("task_id"), "task_id")
+            if tid is None:
+                raise ApiError("task_id is required")
+            try:
+                f = feats.detach(c, f.id, tid, project_id=p.id)
+            except KeyError as e:
+                raise ApiError(str(e), status=404)
+            return {**f.to_dict(), "progress": feats.progress(c, f.id)}
+
     def features_show(self, query: dict) -> dict:
         with self._conn() as c:
             p = self._resolve_project(c, query.get("project"))
@@ -342,7 +626,7 @@ class Api:
             return {**f.to_dict(), "progress": feats.progress(c, f.id),
                     "completion_signal": feats.check_completion(c, f.id)}
 
-    # --- git (step f, read-only) -------------------------------------------
+    # --- git -------------------------------------------
 
     def git_link(self, body: dict) -> dict:
         path = body.get("path")
@@ -381,7 +665,7 @@ class Api:
                 c, repo_path=repo, project_id=pid,
                 task_id=self._int(query.get("task"), "task"),
                 unparsed=query.get("unparsed") in ("1", "true", "yes"),
-                limit=self._int(query.get("limit"), "limit", 100),
+                limit=self._int(query.get("limit"), "limit", 100, hi=Api.MAX_LIST_LIMIT),
             )
             return {"count": len(rows), "commits": [r.to_dict() for r in rows]}
 
@@ -392,7 +676,23 @@ class Api:
             data["project"] = p.slug
             return data
 
-    # --- devlog (step e) ---------------------------------------------------
+    def git_ignore(self, body: dict) -> dict:
+        """Add/refresh the marker-delimited DevDash block in the linked repo's
+        .gitignore (idempotent). Explicit user action; touches no git history."""
+        with self._conn() as c:
+            p = self._resolve_project(c, body.get("project"))
+            repo = body.get("repo") or gitwatch.get_link(c, p.id)
+            if not repo:
+                raise ApiError(f"project {p.slug} has no linked repo", status=400)
+            home = self.home or config.devdash_home()
+            try:
+                r = gitwatch.ensure_gitignore(repo, home=home)
+            except gitwatch.GitError as e:
+                raise ApiError(str(e))
+            r["project"] = p.slug
+            return r
+
+    # --- devlog ---------------------------------------------------
 
     def logs_list(self, query: dict) -> dict:
         with self._conn() as c:
@@ -401,7 +701,7 @@ class Api:
                 c, project_id=pid,
                 task_id=self._int(query.get("task"), "task"),
                 query=query.get("q") or None,
-                limit=self._int(query.get("limit"), "limit", 200),
+                limit=self._int(query.get("limit"), "limit", 200, hi=Api.MAX_LIST_LIMIT),
             )
             return {"count": len(rows), "entries": [r.to_dict() for r in rows]}
 
@@ -419,7 +719,33 @@ class Api:
                 raise ApiError(str(e2))
             return {**e.to_dict(), "project": p.slug}
 
-    # --- sessions (step d) -------------------------------------------------
+    def logs_update(self, body: dict) -> dict:
+        eid = self._int(body.get("id"), "id")
+        if eid is None:
+            raise ApiError("id is required")
+        with self._conn() as c:
+            try:
+                e = logs.update(c, eid,
+                                content=body.get("content"),
+                                tags=body.get("tags") if "tags" in body else None)
+            except KeyError:
+                raise ApiError(f"no log entry #{eid}", status=404)
+            except ValueError as e:
+                raise ApiError(str(e))
+            return e.to_dict()
+
+    def logs_delete(self, body: dict) -> dict:
+        eid = self._int(body.get("id"), "id")
+        if eid is None:
+            raise ApiError("id is required")
+        with self._conn() as c:
+            try:
+                e = logs.delete(c, eid)
+            except KeyError:
+                raise ApiError(f"no log entry #{eid}", status=404)
+            return {"deleted": e.id}
+
+    # --- sessions -------------------------------------------------
 
     def session_start(self, body: dict) -> dict:
         with self._conn() as c:
@@ -463,7 +789,7 @@ class Api:
                 task_id=self._int(query.get("task"), "task"),
                 today=query.get("today") in ("1", "true", "yes"),
                 week=query.get("week") in ("1", "true", "yes"),
-                limit=self._int(query.get("limit"), "limit", 50),
+                limit=self._int(query.get("limit"), "limit", 50, hi=Api.MAX_LIST_LIMIT),
             )
             return {"count": len(rows), "sessions": [r.to_dict() for r in rows]}
 

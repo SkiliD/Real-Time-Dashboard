@@ -1,4 +1,4 @@
-"""Core tests (step a): schema, projects (multi-project + lossless active
+"""Core tests: schema, projects (multi-project + lossless active
 switch), tasks (filters, solo-focus start), events bus, config roundtrip.
 
 Run with: python -m pytest -q

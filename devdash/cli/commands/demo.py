@@ -1,4 +1,4 @@
-"""`devdash demo ...` commands (step k): seed demo data to explore the tool."""
+"""`devdash demo ...` commands: seed demo data to explore the tool."""
 
 from __future__ import annotations
 

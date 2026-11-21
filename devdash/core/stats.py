@@ -7,7 +7,7 @@ are computed in the machine's LOCAL timezone via models helpers.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from . import sessions
 from . import tasks as tsk
@@ -65,6 +65,22 @@ def today_minutes(conn: sqlite3.Connection, project_id: int | None = None) -> fl
     return round(total, 2)
 
 
+def tasks_done_today(conn: sqlite3.Connection, project_id: int | None = None) -> int:
+    """Tasks completed today (LOCAL day), as one SQL COUNT.
+
+    Same boundary as status.snapshot(): completed_at >= start of today local.
+    """
+    clauses = ["status = 'done'", "completed_at IS NOT NULL", "completed_at >= ?"]
+    values: list = [day_start_utc(0)]
+    if project_id is not None:
+        clauses.append("project_id = ?")
+        values.append(project_id)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS n FROM tasks WHERE {' AND '.join(clauses)}", values
+    ).fetchone()
+    return int(row["n"])
+
+
 def tasks_done_by_day(conn: sqlite3.Connection, project_id: int | None = None, days: int = 7) -> list[dict]:
     """Tasks completed per day, oldest first, gaps filled with 0."""
     clauses = ["status = 'done'", "completed_at IS NOT NULL", "completed_at >= ?"]
@@ -118,8 +134,12 @@ def project_progress(conn: sqlite3.Connection, project_id: int) -> dict:
 
 
 def period_minutes(conn: sqlite3.Connection, project_id: int | None = None, days: int = 7) -> float:
-    """Total minutes of stopped sessions over the last `days` days (rolling window)."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    """Total minutes of stopped sessions over the last `days` LOCAL days.
+
+    Uses the same day boundary as time_by_day() so the period total always
+    equals the sum of the per-day buckets (no rolling-UTC drift).
+    """
+    cutoff = _cutoff(days)
     clauses = ["ended_at IS NOT NULL", "started_at >= ?"]
     values: list = [cutoff]
     if project_id is not None:
@@ -129,6 +149,42 @@ def period_minutes(conn: sqlite3.Connection, project_id: int | None = None, days
         f"SELECT duration_min FROM sessions WHERE {' AND '.join(clauses)}", values
     ).fetchall()
     return round(sum(r["duration_min"] or 0.0 for r in rows), 2)
+
+
+def regroup_rows(rows: list[dict], group: str, value_key: str) -> list[dict]:
+    """Re-bucket daily rows [{date: 'YYYY-MM-DD', <value_key>: n}] into
+    weeks ('YYYY-Www') or months ('YYYY-MM'). Day = unchanged. Labels sorted."""
+    if group not in ("week", "month"):
+        return rows
+    buckets: dict[str, float] = {}
+    for r in rows:
+        d = r["date"]
+        if group == "month":
+            label = d[:7]
+        else:
+            iso = date.fromisoformat(d).isocalendar()
+            label = f"{iso[0]}-W{iso[1]:02d}"
+        buckets[label] = buckets.get(label, 0.0) + (r.get(value_key) or 0)
+    return [{"date": k, value_key: round(v, 2)} for k, v in sorted(buckets.items())]
+
+
+def minutes_by_project(conn: sqlite3.Connection, days: int = 30) -> list[dict]:
+    """Minutes worked per project over the last `days` days (all projects),
+    most active first. Used by the GUI stats 'all projects' breakdown."""
+    cutoff = _cutoff(days)
+    rows = conn.execute(
+        "SELECT p.id, p.slug, p.name, p.color, "
+        "COALESCE(SUM(s.duration_min), 0) AS minutes "
+        "FROM projects p LEFT JOIN sessions s "
+        "  ON s.project_id = p.id AND s.ended_at IS NOT NULL AND s.started_at >= ? "
+        "WHERE p.archived = 0 GROUP BY p.id ORDER BY minutes DESC",
+        (cutoff,),
+    ).fetchall()
+    return [
+        {"project": r["id"], "slug": r["slug"], "name": r["name"],
+         "color": r["color"], "minutes": round(r["minutes"] or 0.0, 2)}
+        for r in rows
+    ]
 
 
 def by_tag(conn: sqlite3.Connection, project_id: int | None = None) -> list[dict]:

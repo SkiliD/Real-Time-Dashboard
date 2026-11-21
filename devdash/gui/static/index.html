@@ -8,6 +8,14 @@
 </head>
 <body>
 <div id="toast" class="hidden" role="alert"></div>
+
+<div id="palette" class="hidden" role="dialog" aria-modal="true">
+  <div class="palette-card">
+    <input id="palette-input" type="text" autocomplete="off" data-i18n-ph="gui.palette.ph" placeholder="">
+    <ul id="palette-list"></ul>
+    <div class="palette-hint dim" data-i18n="gui.palette.hint"></div>
+  </div>
+</div>
 <div id="app">
 
   <aside id="sidebar">
@@ -29,8 +37,16 @@
         <div id="session-timer" class="hidden">
           <span class="pulse">⏱</span> <span id="session-clock" class="mono">00:00</span>
           <span id="session-kind" class="dim"></span>
+          <span id="session-eta" class="dim small hidden"></span>
         </div>
         <select id="session-task" data-i18n-title="gui.session_task_title" title="Tâche liée à la session"><option value="" data-i18n="gui.no_task">— Sans tâche —</option></select>
+        <select id="session-kind-sel">
+          <option value="focus" data-i18n="kind.focus">Focus</option>
+          <option value="pause" data-i18n="kind.pause">Pause</option>
+          <option value="custom" data-i18n="kind.custom">Libre</option>
+        </select>
+        <input id="session-minutes" type="number" min="1" max="480" step="5" data-i18n-ph="gui.sess.minutes" placeholder="min" title="Durée (min, optionnel)" style="width:64px">
+        <label class="dim chk-inline" data-i18n-title="gui.sess.pomodoro" title="Pomodoro"><input type="checkbox" id="session-pomodoro"> 🍅</label>
         <button id="btn-session-start" class="btn btn-sm btn-primary" data-i18n="gui.session_start">▶ Session</button>
         <input id="session-note" class="hidden" type="text" data-i18n-ph="gui.session_note_ph" placeholder="Note de fin (fait / blocage)…">
         <button id="btn-session-stop" class="btn btn-sm hidden" data-i18n="gui.session_stop">■ Stop</button>
@@ -38,12 +54,13 @@
     </header>
 
     <nav id="tabs">
-      <button class="tab active" data-tab="tasks" data-i18n="gui.tab.tasks">Tâches</button>
-      <button class="tab" data-tab="log" data-i18n="gui.tab.log">Devlog</button>
-      <button class="tab" data-tab="git" data-i18n="gui.tab.git">Git</button>
-      <button class="tab" data-tab="features" data-i18n="gui.tab.features">Features</button>
-      <button class="tab" data-tab="stats" data-i18n="gui.tab.stats">Stats</button>
-      <button class="tab hidden" data-tab="ai" id="tab-ai-btn" data-i18n="gui.tab.ai">Assistant IA</button>
+      <button class="tab active" data-tab="tasks"><span data-i18n="gui.tab.tasks">Tâches</span><span class="tab-badge hidden" id="badge-tasks"></span></button>
+      <button class="tab" data-tab="log"><span data-i18n="gui.tab.log">Devlog</span></button>
+      <button class="tab" data-tab="git"><span data-i18n="gui.tab.git">Git</span></button>
+      <button class="tab" data-tab="features"><span data-i18n="gui.tab.features">Features</span><span class="tab-badge hidden" id="badge-features"></span></button>
+      <button class="tab" data-tab="stats"><span data-i18n="gui.tab.stats">Stats</span></button>
+      <button class="tab hidden" data-tab="ai" id="tab-ai-btn"><span data-i18n="gui.tab.ai">Assistant IA</span></button>
+      <button class="tab" data-tab="settings"><span data-i18n="gui.tab.settings">Réglages</span></button>
     </nav>
 
     <section id="tab-tasks" class="tab-page">
@@ -60,6 +77,13 @@
         <input id="new-task-est" type="number" min="0" step="5" data-i18n-ph="gui.est_ph" placeholder="Est. (min)" data-i18n-title="gui.est_title" title="Estimation en minutes">
         <button id="btn-add-task" class="btn" data-i18n="gui.add">Ajouter</button>
         <span class="spacer"></span>
+        <input id="filter-search" type="text" data-i18n-ph="gui.task.search_ph" placeholder="Rechercher…">
+        <select id="filter-priority"><option value="" data-i18n="gui.task.all_prio">Toutes les priorités</option>
+          <option value="critical" data-i18n="prio.critical">Critique</option>
+          <option value="high" data-i18n="prio.high">Haute</option>
+          <option value="medium" data-i18n="prio.medium">Moyenne</option>
+          <option value="low" data-i18n="prio.low">Basse</option>
+        </select>
         <select id="filter-tag"><option value="" data-i18n="gui.all_tags">Tous les tags</option></select>
       </div>
 
@@ -68,6 +92,8 @@
         <div class="col" data-status="in_progress"><h3><span data-i18n="gui.col.in_progress">En cours</span> <span class="count" id="count-in_progress"></span></h3><div class="cards" id="col-in_progress"></div></div>
         <div class="col" data-status="done"><h3><span data-i18n="gui.col.done">Terminées</span> <span class="count" id="count-done"></span></h3><div class="cards" id="col-done"></div></div>
       </div>
+
+      <div id="tasks-empty" class="hidden"><p class="dim" data-i18n="gui.tasks.empty"></p></div>
 
       <div id="sessions-section">
         <h3 data-i18n="gui.sessions_recent">Sessions récentes</h3>
@@ -92,7 +118,10 @@
         <button id="btn-git-link" class="btn btn-sm" data-i18n="gui.git_link">Lier le dépôt</button>
         <button id="btn-git-unlink" class="btn btn-sm" data-i18n="gui.git_unlink">Délier</button>
         <button id="btn-git-sync" class="btn btn-sm" data-i18n="gui.git_sync">↻ Sync</button>
+        <button id="btn-git-ignore" class="btn btn-sm" data-i18n="gui.git.ignore_btn" title="Ajouter le bloc DevDash au .gitignore du dépôt (fichiers locaux jamais commités)">Ajouter au .gitignore</button>
+        <span id="git-ignore-status" class="dim small"></span>
         <span class="spacer"></span>
+        <select id="git-task-filter"><option value="" data-i18n="gui.git.all_tasks">Toutes les tâches</option></select>
         <label class="dim"><input type="checkbox" id="git-unparsed"> <span data-i18n="gui.git_unparsed">Commits non reconnus</span></label>
       </div>
       <div id="git-status" class="dim"></div>
@@ -122,7 +151,125 @@
       </div>
     </section>
 
+    <section id="tab-settings" class="tab-page hidden">
+      <div class="settings-card">
+        <h3 data-i18n="gui.set.title">Assistant IA (optionnel)</h3>
+        <p class="dim" data-i18n="gui.set.sub"></p>
+        <label class="chk"><input type="checkbox" id="cfg-enabled"> <span data-i18n="gui.set.enabled">Activer l’assistant IA</span></label>
+
+        <div class="field">
+          <label for="cfg-provider" data-i18n="gui.set.provider">Provider</label>
+          <select id="cfg-provider"></select>
+          <div class="dim field-desc" id="cfg-provider-desc"></div>
+        </div>
+        <div class="field" id="field-model">
+          <label for="cfg-model" data-i18n="gui.set.model">Modèle</label>
+          <input id="cfg-model" type="text" data-i18n-ph="gui.set.model_ph" placeholder="">
+        </div>
+        <div class="field" id="field-base-url">
+          <label for="cfg-base-url" data-i18n="gui.set.base_url">URL de base (optionnel)</label>
+          <input id="cfg-base-url" type="text" data-i18n-ph="gui.set.base_url_ph" placeholder="">
+        </div>
+        <div class="field hidden" id="field-api-key">
+          <label for="cfg-api-key" data-i18n="gui.set.api_key">Clé API (cloud uniquement)</label>
+          <input id="cfg-api-key" type="password" autocomplete="off" data-i18n-ph="gui.set.api_key_ph" placeholder="">
+          <div class="dim field-desc hidden" id="cfg-api-key-set" data-i18n="gui.set.api_key_set"></div>
+        </div>
+        <div class="field hidden" id="field-cli">
+          <label for="cfg-cli" data-i18n="gui.set.cli_command">Commande CLI</label>
+          <input id="cfg-cli" type="text" data-i18n-ph="gui.set.cli_command_ph" placeholder="">
+        </div>
+        <div class="field">
+          <label for="cfg-context-max" data-i18n="gui.set.context_max">Contexte max (caractères)</label>
+          <input id="cfg-context-max" type="number" min="500" max="200000" step="500">
+        </div>
+
+        <fieldset class="flags">
+          <legend data-i18n="gui.set.flags">Fonctions actives</legend>
+          <label class="chk"><input type="checkbox" id="flag-chat"> <span data-i18n="gui.set.flag.chat">Chat</span></label>
+          <label class="chk"><input type="checkbox" id="flag-summarize"> <span data-i18n="gui.set.flag.summarize">Résumé de semaine</span></label>
+          <label class="chk"><input type="checkbox" id="flag-plan"> <span data-i18n="gui.set.flag.plan">Découpage de tâches</span></label>
+          <label class="chk"><input type="checkbox" id="flag-verdict"> <span data-i18n="gui.set.flag.feature_verdict">Verdict sur les features</span></label>
+        </fieldset>
+
+        <div id="cfg-cloud-warn" class="cloud-warn hidden" data-i18n="gui.set.cloud_warn"></div>
+        <div id="cfg-local-note" class="dim hidden" data-i18n="gui.set.local_note"></div>
+
+        <div class="settings-actions">
+          <button id="btn-ai-save" class="btn btn-primary" data-i18n="gui.set.save">Enregistrer</button>
+          <button id="btn-ai-test" class="btn" data-i18n="gui.set.test">Tester la connexion</button>
+          <span id="cfg-status" class="dim"></span>
+        </div>
+        <p class="dim small" id="cfg-path"></p>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="gui.set.general">Général</h3>
+        <p class="dim" data-i18n="gui.set.general_note"></p>
+        <div class="field">
+          <label for="cfg-lang" data-i18n="gui.set.lang">Langue de l’interface</label>
+          <select id="cfg-lang"></select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cfg-pomo-focus" data-i18n="gui.set.pomo_focus">Pomodoro — focus (min)</label>
+            <input id="cfg-pomo-focus" type="number" min="1" max="240" step="1">
+          </div>
+          <div class="field">
+            <label for="cfg-pomo-break" data-i18n="gui.set.pomo_break">Pomodoro — pause (min)</label>
+            <input id="cfg-pomo-break" type="number" min="1" max="120" step="1">
+          </div>
+        </div>
+        <div class="field">
+          <label for="cfg-git-watch" data-i18n="gui.set.git_watch">Surveillance Git (secondes)</label>
+          <input id="cfg-git-watch" type="number" min="5" max="3600" step="5">
+        </div>
+        <div class="field">
+          <label for="cfg-port" data-i18n="gui.set.gui_port">Port de la GUI (au prochain lancement)</label>
+          <input id="cfg-port" type="number" min="1024" max="65535" step="1">
+        </div>
+        <div class="field">
+          <label for="cfg-patterns" data-i18n="gui.set.commit_patterns">Patterns commits → tâches/features</label>
+          <textarea id="cfg-patterns" rows="3" spellcheck="false"></textarea>
+          <div class="dim field-desc" data-i18n="gui.set.commit_patterns_desc"></div>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="gui.set.data">Données</h3>
+        <p class="dim small mono" id="set-home"></p>
+        <p class="dim" data-i18n="gui.set.backup_desc"></p>
+        <div class="settings-actions">
+          <button id="btn-backup" class="btn" data-i18n="gui.set.backup_btn">Sauvegarder maintenant (zip)</button>
+          <button id="btn-export" class="btn" data-i18n="gui.set.export_btn">Exporter en JSON</button>
+          <button id="btn-demo" class="btn" data-i18n="gui.set.demo_btn">Charger les données de démo</button>
+          <span id="backup-status" class="dim"></span>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="gui.upd.title">Mise à jour</h3>
+        <p class="dim small" id="upd-info"></p>
+        <div class="settings-actions">
+          <button id="btn-upd-check" class="btn" data-i18n="gui.upd.check">Vérifier les mises à jour</button>
+          <button id="btn-upd-run" class="btn btn-primary" data-i18n="gui.upd.update">Mettre à jour maintenant</button>
+          <span id="upd-status" class="dim"></span>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-stats" class="tab-page hidden">
+      <div id="stats-toolbar">
+        <label><span data-i18n="gui.stats.project">Projet</span> <select id="stats-project"></select></label>
+        <label><span data-i18n="gui.stats.period">Période</span> <select id="stats-days"></select></label>
+        <label><span data-i18n="gui.stats.group">Grouper par</span>
+          <select id="stats-group">
+            <option value="day" data-i18n="gui.stats.group.day">Jour</option>
+            <option value="week" data-i18n="gui.stats.group.week">Semaine</option>
+            <option value="month" data-i18n="gui.stats.group.month">Mois</option>
+          </select>
+        </label>
+      </div>
       <div id="stat-cards">
         <div class="stat-card"><div class="stat-value" id="stat-today">–</div><div class="stat-label" data-i18n="gui.stat.today">Aujourd’hui</div></div>
         <div class="stat-card"><div class="stat-value" id="stat-week">–</div><div class="stat-label" data-i18n="gui.stat.week">7 jours</div></div>
@@ -131,18 +278,79 @@
         <div class="stat-card"><div class="stat-value" id="stat-progress">–</div><div class="stat-label" data-i18n="gui.stat.progress">Progression</div></div>
       </div>
       <div class="chart-grid">
-        <div class="chart-box"><h4 data-i18n="gui.chart.time">Temps par jour (14 j)</h4><canvas id="chart-time"></canvas></div>
-        <div class="chart-box"><h4 data-i18n="gui.chart.done">Tâches faites par jour (7 j)</h4><canvas id="chart-done"></canvas></div>
+        <div class="chart-box"><h4 id="chart-time-title" data-i18n="gui.chart.time">Temps par jour (14 j)</h4><canvas id="chart-time"></canvas></div>
+        <div class="chart-box"><h4 id="chart-done-title" data-i18n="gui.chart.done">Tâches faites par jour (7 j)</h4><canvas id="chart-done"></canvas></div>
         <div class="chart-box"><h4 data-i18n="gui.chart.tags">Répartition par tag (tâches)</h4><canvas id="chart-tags"></canvas></div>
         <div class="chart-box"><h4 data-i18n="gui.chart.progress">Progression du projet (pondérée)</h4><canvas id="chart-progress"></canvas></div>
+        <div class="chart-box"><h4 id="chart-projects-title" data-i18n="gui.chart.by_project">Temps par projet</h4><canvas id="chart-projects"></canvas></div>
       </div>
     </section>
   </main>
 </div>
 
-<div id="modal" class="hidden">
+<div id="modal-edit" class="hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3 data-i18n="gui.edit.title">Modifier le projet</h3>
+    <label><span data-i18n="gui.modal.name">Nom</span> <input id="e-name" type="text"></label>
+    <label><span data-i18n="gui.modal.engine">Moteur / tech</span>
+      <select id="e-engine">
+        <option value="unity">Unity</option><option value="unreal">Unreal</option>
+        <option value="godot">Godot</option><option value="web">Web</option>
+        <option value="other" data-i18n="engine.other">Autre</option>
+      </select>
+    </label>
+    <label><span data-i18n="gui.modal.color">Couleur</span> <input id="e-color" type="color"></label>
+    <label><span data-i18n="gui.modal.status">Statut</span>
+      <select id="e-status">
+        <option value="idea" data-i18n="pstatus.idea">Idée</option><option value="design" data-i18n="pstatus.design">Conception</option>
+        <option value="prototype" data-i18n="pstatus.prototype">Prototype</option><option value="development" data-i18n="pstatus.development">Développement</option>
+        <option value="beta" data-i18n="pstatus.beta">Beta</option><option value="done" data-i18n="pstatus.done">Terminé</option><option value="paused" data-i18n="pstatus.paused">En pause</option>
+      </select>
+    </label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <input id="e-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <label class="chk"><input type="checkbox" id="e-archived"> <span data-i18n="gui.proj.archived">Archivé (masqué de la liste)</span></label>
+    <p class="dim small hidden" id="e-delete-warn" data-i18n="gui.edit.delete_warn"></p>
+    <div class="modal-actions">
+      <button id="btn-edit-delete" class="btn btn-danger" data-i18n="gui.edit.delete">Supprimer…</button>
+      <span class="spacer"></span>
+      <button id="btn-cancel-edit" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
+      <button id="btn-save-edit" class="btn btn-primary" data-i18n="gui.edit.save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-task" class="hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3 id="task-modal-title"><span id="task-modal-title-text">Modifier la tâche</span> <button id="btn-copy-task-id" class="mini-btn" data-i18n-title="gui.copy_id" title="Copier l’identifiant">⧉</button></h3>
+    <label><span data-i18n="gui.modal.name">Titre</span> <input id="t-title" type="text"></label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <input id="t-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <label><span data-i18n="gui.task.priority">Priorité</span>
+      <select id="t-priority">
+        <option value="low" data-i18n="prio.low">Basse</option>
+        <option value="medium" data-i18n="prio.medium">Moyenne</option>
+        <option value="high" data-i18n="prio.high">Haute</option>
+        <option value="critical" data-i18n="prio.critical">Critique</option>
+      </select>
+    </label>
+    <label><span data-i18n="gui.task.tags">Tags</span> <input id="t-tags" type="text"></label>
+    <label><span data-i18n="gui.est_title">Estimation (min)</span> <input id="t-est" type="number" min="0" step="5"></label>
+    <label><span data-i18n="gui.task.parent">Tâche parente</span> <select id="t-parent"><option value="" data-i18n="gui.task.none">— aucune —</option></select></label>
+    <label><span data-i18n="gui.task.feature">Feature liée</span> <select id="t-feature"><option value="" data-i18n="gui.task.none">— aucune —</option></select></label>
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button id="btn-cancel-task" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
+      <button id="btn-save-task" class="btn btn-primary" data-i18n="gui.edit.save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal" class="hidden" role="dialog" aria-modal="true">
   <div class="modal-card">
     <h3 data-i18n="gui.modal.title">Nouveau projet</h3>
+    <label><span data-i18n="gui.modal.path">Dossier existant à connecter (optionnel)</span>
+      <input id="f-path" type="text" data-i18n-ph="gui.modal.path_ph" placeholder="C:\projets\mon-jeu…">
+    </label>
+    <p class="dim small" id="f-detect"></p>
     <label><span data-i18n="gui.modal.name">Nom</span> <input id="f-name" type="text" placeholder="Aether Vale"></label>
     <label><span data-i18n="gui.modal.engine">Moteur / tech</span>
       <select id="f-engine">
@@ -163,6 +371,25 @@
     <div class="modal-actions">
       <button id="btn-cancel-modal" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
       <button id="btn-create-project" class="btn btn-primary" data-i18n="gui.modal.create">Créer</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-help" class="hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3 data-i18n="gui.help.title">Raccourcis clavier</h3>
+    <table class="help-table">
+      <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td data-i18n="gui.help.k1"></td></tr>
+      <tr><td><kbd>n</kbd></td><td data-i18n="gui.help.k2"></td></tr>
+      <tr><td><kbd>/</kbd></td><td data-i18n="gui.help.k3"></td></tr>
+      <tr><td><kbd>s</kbd></td><td data-i18n="gui.help.k4"></td></tr>
+      <tr><td><kbd>1</kbd>–<kbd>7</kbd></td><td data-i18n="gui.help.k5"></td></tr>
+      <tr><td><kbd>r</kbd></td><td data-i18n="gui.help.k6"></td></tr>
+      <tr><td><kbd>Échap</kbd></td><td data-i18n="gui.help.k7"></td></tr>
+      <tr><td><kbd>?</kbd></td><td data-i18n="gui.help.k8"></td></tr>
+    </table>
+    <div class="modal-actions"><span class="spacer"></span>
+      <button id="btn-close-help" class="btn btn-primary" data-i18n="gui.modal.close">Fermer</button>
     </div>
   </div>
 </div>

@@ -17,17 +17,29 @@ Everything stays on your machine: **no account, no cloud, no internet needed**.
 ## What can it do?
 
 - **Projects**: several at once (Unity, Unreal, Godot, web…), one "active" at a time.
-  Switching never loses or mixes anything.
-- **Tasks**: a to-do list with priorities, tags (`gameplay`, `ui`…), time estimates
-  and sub-tasks, shown as a kanban board.
-- **Work timer**: start/stop sessions, with a Pomodoro mode (25 min focus + 5 min
-  break by default). Each session can end with a note: what you did, what's blocking.
-- **Devlog**: quick dated notes — decisions, ideas, blockers. Searchable. This is
-  your long-term memory.
+  Switching never loses or mixes anything. **Connect an existing project**: the
+  "folder" field in the "New project" window (or `devdash projects connect <path>`)
+  — engine auto-detected (Unity/Unreal/Godot/web via marker files), enclosing git
+  repo auto-linked read-only. From the sidebar (✎ button on hover): rename, change
+  engine/color/status, or permanently delete (with confirmation).
+- **Tasks**: a to-do list with priorities, tags (`gameplay`, `ui`…), time estimates,
+  subtasks and search, shown as a **drag & drop kanban** — click a card to edit it
+  (title, description, priority, tags, parent, feature).
+- **Work timer**: start/stop sessions (focus / break / custom, custom duration,
+  Pomodoro mode 25+5 min by default). Each session can end with a note: what you
+  did, what's blocking.
+- **Devlog**: quick dated notes — decisions, ideas, blockers. Searchable, editable,
+  deletable. This is your long-term memory.
 - **Git, read-only**: link a repository and DevDash shows your commits (branch, last
   commit, commits per day) and links them to tasks automatically (`#42`,
-  `feat(dash): …`). It **only reads** — it never changes your repo.
-- **Stats**: time worked per day, tasks done, day streak, charts.
+  `feat(dash): …`). It **only reads** — it never changes your repo. One explicit
+  exception: `devdash git ignore` (or the "Add to .gitignore" button in the Git tab)
+  writes a **marker-delimited block** into YOUR repo's `.gitignore` so DevDash local
+  files (db, config, backups, exports) never get committed — idempotent, never
+  duplicated.
+- **Stats**: work time, tasks done, day streak, progress — with **filters**: by project
+  (active / one / all projects), period (7 to 365 days), grouping (day / week / month),
+  plus a "time by project" comparison chart.
 - **Features**: group tasks into a feature. A feature is only marked "done" **by
   you** — never automatically.
 - **Optional AI assistant**: ask questions about your project ("where do I stand?"),
@@ -79,6 +91,8 @@ devdash status           # text snapshot of the active project
 With a real project:
 
 ```bash
+devdash projects connect "C:\path\to\my\project"   # EXISTING folder: engine auto-detected (Unity/Unreal/Godot/web), git repo auto-linked read-only
+# or by hand:
 devdash projects create "Aether Vale" --engine unity --set-active
 devdash git link "C:\path\to\my\repo"
 devdash task add "Player dash" --priority high --tag gameplay --est 90
@@ -117,9 +131,32 @@ new Git commits, which a background watcher picks up every 20 seconds.
 | AI help | `devdash ai ask "where do I stand?"` · `devdash ai plan "combat system" --apply` · `devdash ai context` |
 | connect an AI agent (Claude Code…) | `devdash mcp` — see below |
 
+## Updating after a `git pull`
+
+```bash
+devdash update           # ff-only pull + dependency reinstall (git installs)
+devdash update --check   # only check whether an update exists
+devdash update status    # install mode + git info (no network)
+devdash version          # version + git hash of the checkout
+```
+From the GUI: **⚙ Settings → Update** (check / update in one click, then restart the
+GUI). pip/pipx installs: `pip install --upgrade devdash` / `pipx upgrade devdash`.
+Standalone executable: replace it or rebuild it (`py -3 scripts/build_exe.py`).
+Never force-pulls, and refuses to update while the repo has uncommitted changes.
+
+## Settings (⚙ tab)
+
+Everything is adjustable from the app itself: AI provider (local or cloud) with
+a connection test, **interface language** (English/French, applies instantly),
+**Pomodoro** durations, **Git watcher** interval, **GUI port**, **commit
+patterns** linking commits to tasks, and a **"Back up now"** button (timestamped
+zip of the data folder). No file editing needed.
+
 ## The AI assistant (optional)
 
-Off by default. Enable it in `~/.devdash/config.json`:
+Off by default. Easiest way: open the GUI's **⚙ Settings** tab, pick a provider
+(local or cloud), fill in the model/key, hit *Test connection* then *Save* — no
+file editing needed. Or do it by hand in `~/.devdash/config.json`:
 
 ```json
 { "ai_enabled": true, "ai_provider": "ollama", "ai_model": "qwen3:8b" }
@@ -199,6 +236,9 @@ PYTHONPATH=. python -m pytest -q    # 119 tests
 
 Optional extras: `pip install playwright && playwright install chromium` enables a
 real-browser GUI test (it skips automatically otherwise).
+
+📚 **Going further** (full technical reference: every command, SQL schema, Vibe /
+Claude Code hooks, MCP, architecture, security details): [docs/README.detail.en.md](docs/README.detail.en.md)
 
 ## What DevDash deliberately is not
 

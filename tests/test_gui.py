@@ -1,4 +1,4 @@
-"""GUI tests (step c): the JSON Api directly + the HTTP server end-to-end.
+"""GUI tests: the JSON Api directly + the HTTP server end-to-end.
 
 pywebview itself (the native window) is not tested here; the server and API
 are what matter, and both GUI modes share them.
@@ -132,7 +132,7 @@ def test_http_server_end_to_end(home):
             assert e.code == 404
             assert "ghost" in json.loads(e.read())["error"]
 
-        # --- sessions (step d) ---
+        # --- sessions ---
         req = urllib.request.Request(
             base + "/api/session/start",
             data=json.dumps({"kind": "focus", "minutes": 25}).encode(),
@@ -158,7 +158,7 @@ def test_http_server_end_to_end(home):
         st = json.loads(urllib.request.urlopen(base + "/api/status").read())
         assert st["active"]["slug"] == "game" and st["session"] is None
 
-        # --- devlog (step e) ---
+        # --- devlog ---
         req = urllib.request.Request(
             base + "/api/logs/add",
             data=json.dumps({"content": "Décision : dash = 0.3s i-frames", "tags": ["decision"]}).encode(),

@@ -1,4 +1,4 @@
-"""Optional AI assistant layer (step i).
+"""Optional AI assistant layer.
 
 Fully optional: with `ai_enabled = false` (default) in config.json,
 `get_provider()` returns None and every AI feature cleanly reports disabled.
@@ -123,4 +123,128 @@ def ai_status(cfg: cfgmod.Config) -> dict:
         # cloud = data leaves the machine (visual reminder required in the GUI)
         "cloud": is_cloud(cfg, provider),
         "flags": cfg.ai_feature_flags if enabled else {},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Provider catalog + GUI-driven configuration (no secrets ever leave this
+# module through the catalog / status dicts).
+# ---------------------------------------------------------------------------
+
+#: Metadata for every selectable provider. `scope` drives the cloud warning;
+#: the needs_* flags drive which form fields the GUI shows.
+PROVIDER_CATALOG: list[dict] = [
+    {"id": "ollama", "scope": "local", "needs_model": True, "needs_key": False,
+     "needs_base_url": True, "needs_cli_command": False, "default_base_url": DEFAULT_OLLAMA_URL},
+    {"id": "local", "scope": "local", "needs_model": True, "needs_key": False,
+     "needs_base_url": True, "needs_cli_command": False, "default_base_url": DEFAULT_LOCAL_OPENAI_URL},
+    {"id": "cli", "scope": "local", "needs_model": False, "needs_key": False,
+     "needs_base_url": False, "needs_cli_command": True, "default_base_url": ""},
+    {"id": "mock", "scope": "local", "needs_model": False, "needs_key": False,
+     "needs_base_url": False, "needs_cli_command": False, "default_base_url": ""},
+    {"id": "anthropic", "scope": "cloud", "needs_model": True, "needs_key": True,
+     "needs_base_url": True, "needs_cli_command": False, "default_base_url": DEFAULT_ANTHROPIC_URL},
+    {"id": "mistral", "scope": "cloud", "needs_model": True, "needs_key": True,
+     "needs_base_url": True, "needs_cli_command": False, "default_base_url": DEFAULT_MISTRAL_URL},
+    {"id": "openai", "scope": "cloud", "needs_model": True, "needs_key": True,
+     "needs_base_url": True, "needs_cli_command": False, "default_base_url": DEFAULT_OPENAI_URL},
+    {"id": "openai_compat", "scope": "cloud", "needs_model": True, "needs_key": True,
+     "needs_base_url": True, "needs_cli_command": False, "default_base_url": ""},
+]
+
+PROVIDER_IDS = {p["id"] for p in PROVIDER_CATALOG}
+
+#: AI feature flags that can be toggled individually
+FEATURE_FLAGS = ("chat", "summarize", "plan", "feature_verdict")
+
+#: bounds for validated string/int fields coming from the GUI form
+_MAX_FIELD = 500
+_CONTEXT_MIN, _CONTEXT_MAX = 500, 200_000
+
+
+def provider_catalog() -> list[dict]:
+    """Public provider metadata for the settings form (never contains keys)."""
+    return [dict(p) for p in PROVIDER_CATALOG]
+
+
+def apply_ai_settings(cfg: cfgmod.Config, data: dict) -> cfgmod.Config:
+    """Validate + apply AI settings from a dict (GUI form / future CLI).
+
+    Raises ValueError with a user-safe message (never echoes the API key).
+    An empty/"***" ai_api_key means "keep the existing one".
+    """
+    if not isinstance(data, dict):
+        raise ValueError("settings must be a JSON object")
+
+    def _str_field(name: str, current: str) -> str:
+        if name not in data:
+            return current
+        v = data[name]
+        if v is None or v == "" or (name == "ai_api_key" and str(v).strip() in ("***", "••••••")):
+            return current  # empty = keep existing (the key is write-only)
+        if not isinstance(v, str) or len(v) > _MAX_FIELD:
+            raise ValueError(f"{name}: expected a string of at most {_MAX_FIELD} characters")
+        return v.strip()
+
+    provider = _str_field("ai_provider", cfg.ai_provider).lower()
+    if provider not in PROVIDER_IDS:
+        raise ValueError(
+            f"unknown ai_provider {provider!r} — expected one of: " + ", ".join(sorted(PROVIDER_IDS))
+        )
+    cfg.ai_provider = provider
+    cfg.ai_model = _str_field("ai_model", cfg.ai_model)
+    cfg.ai_api_key = _str_field("ai_api_key", cfg.ai_api_key)
+    cfg.ai_cli_command = _str_field("ai_cli_command", cfg.ai_cli_command)
+
+    base_url = _str_field("ai_base_url", cfg.ai_base_url)
+    if base_url and not base_url.startswith(("http://", "https://")):
+        raise ValueError("ai_base_url must start with http:// or https://")
+    cfg.ai_base_url = base_url
+
+    if "ai_enabled" in data:
+        if not isinstance(data["ai_enabled"], bool):
+            raise ValueError("ai_enabled must be true or false")
+        cfg.ai_enabled = data["ai_enabled"]
+
+    if "ai_context_max_chars" in data and data["ai_context_max_chars"] not in (None, ""):
+        v = data["ai_context_max_chars"]
+        if isinstance(v, bool) or not isinstance(v, int):
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                raise ValueError("ai_context_max_chars must be an integer")
+        if not (_CONTEXT_MIN <= v <= _CONTEXT_MAX):
+            raise ValueError(f"ai_context_max_chars must be between {_CONTEXT_MIN} and {_CONTEXT_MAX}")
+        cfg.ai_context_max_chars = v
+
+    if "ai_feature_flags" in data and data["ai_feature_flags"] is not None:
+        flags = data["ai_feature_flags"]
+        if not isinstance(flags, dict):
+            raise ValueError("ai_feature_flags must be an object")
+        new_flags = dict(cfg.ai_feature_flags)
+        for k, v in flags.items():
+            if k not in FEATURE_FLAGS:
+                continue  # unknown flag: ignore
+            if not isinstance(v, bool):
+                raise ValueError(f"ai_feature_flags.{k} must be true or false")
+            new_flags[k] = v
+        cfg.ai_feature_flags = new_flags
+
+    return cfg
+
+
+def public_ai_config(cfg: cfgmod.Config, home=None) -> dict:
+    """Config view for the GUI — the API key is NEVER included, only whether one is set."""
+    from pathlib import Path as _P
+    return {
+        "ai_enabled": bool(cfg.ai_enabled),
+        "ai_provider": (cfg.ai_provider or "ollama").lower(),
+        "ai_model": cfg.ai_model,
+        "ai_base_url": cfg.ai_base_url,
+        "ai_cli_command": cfg.ai_cli_command,
+        "ai_context_max_chars": cfg.ai_context_max_chars,
+        "ai_feature_flags": dict(cfg.ai_feature_flags),
+        "api_key_set": bool(cfg.ai_api_key),
+        "cloud": is_cloud(cfg),
+        "config_path": str(cfgmod.config_path(_P(home) if home else None)),
     }

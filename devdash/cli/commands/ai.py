@@ -1,4 +1,4 @@
-"""`devdash ai ...` commands (step i) — OPTIONAL AI assistant.
+"""`devdash ai ...` commands — OPTIONAL AI assistant.
 
 Without AI configured (ai_enabled=false in ~/.devdash/config.json), these
 commands fail cleanly with a clear message and the rest of DevDash is fully

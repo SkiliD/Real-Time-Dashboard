@@ -76,3 +76,8 @@ desktop.ini
 # --- Divers ---
 /tmp/
 *.tmp
+
+# DevDash local backups (never commit data)
+devdash-backup-*.zip
+devdash-export-*.json
+.devdash-snapshot-*.db

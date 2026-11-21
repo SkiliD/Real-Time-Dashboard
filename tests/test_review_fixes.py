@@ -1,6 +1,6 @@
-"""Regression tests for the full code-review fix pass (post step j).
+"""Regression tests for core/GUI correctness and security fixes.
 
-Covers the HIGH/MEDIUM findings: detach no-op, cross-project feature
+Covers: detach no-op, cross-project feature
 resolution, parent cycles, LIKE wildcards, events_since cursor, plan JSON
 validation, server Host/Content-Type hardening, active-project scoping of
 GUI list endpoints, UTC normalization of git timestamps, config resilience,

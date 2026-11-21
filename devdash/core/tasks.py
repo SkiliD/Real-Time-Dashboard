@@ -82,6 +82,7 @@ def list(
     parent_id: int | None = None,   # None = all; use "root" for top-level only
     feature_id: int | None = None,
     include_cancelled: bool = True,
+    q: str | None = None,           # case-insensitive substring on title/description
 ) -> list[Task]:
     """List tasks with combinable filters, ordered by status then priority."""
     clauses, values = [], []
@@ -110,6 +111,11 @@ def list(
     if feature_id is not None:
         clauses.append("feature_id = ?")
         values.append(feature_id)
+    if q:
+        # escape LIKE wildcards in user input (same scheme as logs.list)
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("(title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')")
+        values.extend([f"%{escaped}%", f"%{escaped}%"])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     priority_order = "CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
     status_order = "CASE status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'done' THEN 2 ELSE 3 END"
@@ -201,6 +207,13 @@ def update(
         raise KeyError(f"no task with id {task_id}")
     if priority is not _UNSET and priority is not None and priority not in VALID_PRIORITIES:
         raise ValueError(f"invalid priority {priority!r}")
+    # NOT NULL columns: None is only valid for nullable ones (description,
+    # estimate_min, parent_id, feature_id) — an explicit None on title/priority
+    # is a caller bug, fail loudly instead of a raw IntegrityError.
+    if title is not _UNSET and title is None:
+        raise ValueError("title cannot be null")
+    if priority is not _UNSET and priority is None:
+        raise ValueError("priority cannot be null")
     if parent_id is not _UNSET:
         _check_parent(conn, task, parent_id)
     fields, values = [], []
@@ -229,9 +242,16 @@ def update(
 
 
 def list_tags(conn: sqlite3.Connection, project_id: int | None = None) -> list[str]:
-    tasks_in_scope = list(conn, project_id=project_id)
-    seen: dict[str, None] = {}
-    for t in tasks_in_scope:
-        for tag in t.tags:
-            seen.setdefault(tag, None)
-    return sorted(seen)
+    """All distinct tags, computed in SQL (json_each) instead of loading every task."""
+    if project_id is None:
+        rows = conn.execute(
+            "SELECT DISTINCT json_each.value AS v FROM tasks, json_each(tasks.tags) "
+            "ORDER BY v"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT DISTINCT json_each.value AS v FROM tasks, json_each(tasks.tags) "
+            "WHERE project_id = ? ORDER BY v",
+            (project_id,),
+        ).fetchall()
+    return [r["v"] for r in rows]

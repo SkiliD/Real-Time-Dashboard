@@ -1,4 +1,4 @@
-"""`devdash session ...` commands (step d): work sessions + Pomodoro timer.
+"""`devdash session ...` commands: work sessions + Pomodoro timer.
 
 - `session start` creates the session AND runs an interactive live timer
   (Ctrl+C to stop, then a note is prompted). Use --background for scripts.

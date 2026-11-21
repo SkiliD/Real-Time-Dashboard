@@ -1,4 +1,4 @@
-"""AI assistant business functions (step i). Used by BOTH the CLI (`devdash ai
+"""AI assistant business functions. Used by BOTH the CLI (`devdash ai
 ...`) and the GUI (chat panel). SAFETY RULES:
 - read-only by default: `plan(apply=False)` only proposes, never writes;
   `apply=True` (CLI --apply / GUI confirm button) is the explicit human consent;

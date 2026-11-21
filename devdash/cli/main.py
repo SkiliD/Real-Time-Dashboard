@@ -23,6 +23,7 @@ from devdash.cli.commands import session as session_cmd
 from devdash.cli.commands import stats as stats_cmd
 from devdash.cli.commands import status as status_cmd
 from devdash.cli.commands import tasks as tasks_cmd
+from devdash.cli.commands import update as update_cmd
 from devdash.cli.commands.gui import gui
 
 app = typer.Typer(
@@ -49,6 +50,7 @@ app.add_typer(feature_cmd.app, name="feature")
 app.add_typer(ai_cmd.app, name="ai")
 app.add_typer(stats_cmd.app, name="stats")
 app.add_typer(demo_cmd.app, name="demo")
+app.add_typer(update_cmd.app, name="update")
 app.command("backup", help=tr("cmd.backup.help"))(backup_cmd.backup_cmd)
 app.command("export", help=tr("cmd.export.help"))(backup_cmd.export_cmd)
 app.command("import", help=tr("cmd.import.help"))(backup_cmd.import_cmd)
@@ -60,13 +62,16 @@ def mcp_cmd() -> None:
     from devdash.mcp_server import serve
     serve()
 app.command("status", help=tr("status.help"))(status_cmd.status_cmd)
-app.command("gui", help=tr("gui.cmd.help"))(gui)
+app.command("gui", help=tr("cmd.gui.help"))(gui)
 
 
 @app.command(help=tr("cmd.version"))
 def version() -> None:
-    """Print the DevDash version (docstring kept English; help= is translated)."""
-    typer.echo(f"devdash {__version__}")
+    """Print the DevDash version + git head when running from a checkout."""
+    from devdash.core import updater
+    st = updater.git_status()
+    suffix = f" (git {st['head']} @ {st['branch']})" if st.get("git") else f" ({st['mode']})"
+    typer.echo(f"devdash {__version__}{suffix}")
 
 
 def entrypoint() -> None:

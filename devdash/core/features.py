@@ -1,9 +1,9 @@
-"""Features (core) — step (h).
+"""Features (core).
 
 A feature groups tasks of a project. RULE ABSOLUE: a feature becomes 'done'
 ONLY through an explicit human decision — `feature done <nom>` (manual) or
 approving an AI proposal. The system NEVER marks a feature done by itself:
-`check_completion()` is only a *signal* used to EMIT proposals (step i).
+`check_completion()` is only a *signal* used to EMIT proposals.
 Rejected proposals store feedback so they are not proposed again in a loop.
 """
 

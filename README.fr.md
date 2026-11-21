@@ -17,18 +17,31 @@ Tout reste sur ta machine : **pas de compte, pas de cloud, pas besoin d'internet
 ## Que peut-il faire ?
 
 - **Projets** : plusieurs en parallèle (Unity, Unreal, Godot, web…), un seul « actif »
-  à la fois. Changer de projet ne perd ni ne mélange jamais rien.
-- **Tâches** : une to-do liste avec priorités, tags (`gameplay`, `ui`…), estimations
-  de temps et sous-tâches, affichée en kanban.
-- **Minuteur de travail** : démarrage/arrêt de sessions, avec un mode Pomodoro
-  (25 min de focus + 5 min de pause par défaut). Chaque session peut se terminer
-  par une note : ce que tu as fait, ce qui bloque.
+  à la fois. Changer de projet ne perd ni ne mélange jamais rien. **Connecter un
+  projet existant** : champ « dossier » dans la fenêtre « Nouveau projet » (ou
+  `devdash projects connect <chemin>`) — le moteur est détecté automatiquement
+  (Unity/Unreal/Godot/web via les fichiers marqueurs) et le dépôt git englobant
+  est lié automatiquement en lecture seule. Depuis la barre latérale (bouton ✎
+  au survol) : renommer, changer de technologie/couleur/statut, ou supprimer
+  définitivement (avec confirmation).
+- **Tâches** : to-do liste avec priorités, tags (`gameplay`, `ui`…), estimations,
+  sous-tâches et recherche, affichée en **kanban glisser-déposer** — clic sur une
+  carte pour l'éditer (titre, description, priorité, tags, parent, feature).
+- **Minuteur de travail** : démarrage/arrêt de sessions (focus / pause / libre,
+  durée personnalisée, mode Pomodoro 25+5 min par défaut). Chaque session peut se
+  terminer par une note : ce que tu as fait, ce qui bloque.
 - **Devlog** : des notes rapides et datées — décisions, idées, blocages.
-  Cherchables. C'est ta mémoire long terme.
+  Cherchables, modifiables et supprimables. C'est ta mémoire long terme.
 - **Git, en lecture seule** : lie un dépôt et DevDash affiche tes commits (branche,
   dernier commit, commits par jour) et les relie aux tâches (`#42`,
   `feat(dash): …`). Il ne fait que **lire** — il ne modifie jamais ton dépôt.
-- **Stats** : temps travaillé par jour, tâches terminées, série de jours, graphiques.
+  Une seule exception, sur demande explicite : `devdash git ignore` (ou le bouton
+  « Ajouter au .gitignore » dans l'onglet Git) écrit un **bloc balisé** dans le
+  `.gitignore` de TON dépôt pour que les fichiers locaux de DevDash (base, config,
+  backups, exports) ne soient jamais commités — idempotent, jamais dupliqué.
+- **Stats** : temps travaillé, tâches terminées, série de jours, progression — avec
+  **filtres** : par projet (actif / un projet / tous les projets), période (7 à 365 j),
+  groupement (jour / semaine / mois), et graphique comparatif « temps par projet ».
 - **Features** : regroupe des tâches en une feature. Une feature n'est marquée
   « terminée » **que par toi** — jamais automatiquement.
 - **Assistant IA optionnel** : pose des questions sur ton projet (« où en suis-je ? »),
@@ -80,6 +93,8 @@ devdash status           # résumé texte du projet actif
 Avec un vrai projet :
 
 ```bash
+devdash projects connect "C:\chemin\vers\mon\projet"   # dossier EXISTANT : moteur auto-détecté (Unity/Unreal/Godot/web), dépôt git auto-lié en lecture seule
+# ou à la main :
 devdash projects create "Aether Vale" --engine unity --set-active
 devdash git link "C:\chemin\vers\mon\depot"
 devdash task add "Dash du joueur" --priority high --tag gameplay --est 90
@@ -120,9 +135,34 @@ watcher en arrière-plan relève toutes les 20 secondes.
 | de l'aide IA | `devdash ai ask "où en suis-je ?"` · `devdash ai plan "système de combat" --apply` · `devdash ai context` |
 | connecter un agent IA (Claude Code…) | `devdash mcp` — voir ci-dessous |
 
+## Mettre à jour après un `git pull`
+
+```bash
+devdash update           # pull --ff-only + réinstall des dépendances (install git)
+devdash update --check   # juste vérifier si une mise à jour existe
+devdash update status    # mode d'installation + infos git (sans réseau)
+devdash version          # version + hash git du checkout
+```
+Depuis la GUI : onglet **⚙ Réglages → Mise à jour** (vérifier / mettre à jour en un clic,
+la GUI doit être relancée ensuite). Install pip/pipx : `pip install --upgrade devdash` /
+`pipx upgrade devdash`. Exécutable autonome : le remplacer ou le reconstruire
+(`py -3 scripts/build_exe.py`). Aucun force-push, et l'update est refusé si le dépôt
+a des changements non commités.
+
+## Réglages (onglet ⚙)
+
+Tout se règle depuis l'application : provider IA (local ou cloud) avec test de
+connexion, **langue de l'interface** (français/anglais, effet immédiat), durées
+**Pomodoro**, intervalle du **watcher Git**, **port de la GUI**, **patterns de
+commits** liant commits et tâches, et un bouton **« Sauvegarder maintenant »**
+(zip horodaté du dossier de données). Rien ne nécessite d'éditer un fichier.
+
 ## L'assistant IA (optionnel)
 
-Désactivé par défaut. Active-le dans `~/.devdash/config.json` :
+Désactivé par défaut. Le plus simple : onglet **⚙ Réglages** de l'application,
+choisis un provider (local ou cloud), remplis modèle/clé, puis « Tester la
+connexion » et « Enregistrer » — sans éditer de fichier. Ou à la main dans
+`~/.devdash/config.json` :
 
 ```json
 { "ai_enabled": true, "ai_provider": "ollama", "ai_model": "qwen3:8b" }
@@ -218,4 +258,5 @@ un prérequis.
 
 📚 **Pour aller plus loin** (référence technique complète : toutes les commandes,
 schéma SQL, hooks Vibe/Claude Code, MCP, architecture détaillée) :
-[docs/README.detail.md](docs/README.detail.md)
+[docs/README.detail.md](docs/README.detail.md) (🇫🇷) /
+[docs/README.detail.en.md](docs/README.detail.en.md) (🇬🇧)

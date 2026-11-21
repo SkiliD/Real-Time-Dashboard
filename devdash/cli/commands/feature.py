@@ -1,4 +1,4 @@
-"""`devdash feature ...` commands (step h).
+"""`devdash feature ...` commands.
 
 ABSOLUTE RULE: a feature is 'done' ONLY by an explicit human action here
 (`feature done <nom>` = manual validation, or `feature approve <nom>` for an
@@ -192,7 +192,7 @@ def propose_feature(
     reasoning: str = typer.Option("", "--reasoning", "-r"),
     project: str | None = typer.Option(None, "--project", "-p"),
 ) -> None:
-    """Record a proposal (used by the AI assistant in step i). NEVER marks done."""
+    """Record a proposal (used by the AI assistant). NEVER marks done."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
     f = guard(core.propose, conn, ref, pid, source="ai", confidence=confidence, reasoning=reasoning)

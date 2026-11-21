@@ -140,3 +140,67 @@ def save_config(cfg: Config, home: Path | None = None) -> Path:
     except OSError:
         pass  # Windows: best effort
     return path
+
+
+# ---------------------------------------------------------------------------
+# General (non-AI) settings editable from the GUI settings tab.
+# ---------------------------------------------------------------------------
+
+#: bounds for the numeric general settings
+_INT_BOUNDS = {
+    "pomodoro_focus_min": (1, 240),
+    "pomodoro_break_min": (1, 120),
+    "git_watch_interval_sec": (5, 3600),
+    "gui_port": (1024, 65535),
+}
+_MAX_PATTERNS = 10
+_MAX_PATTERN_LEN = 200
+
+
+def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) -> Config:
+    """Validate + apply general settings from a dict (GUI settings tab).
+
+    Raises ValueError with a user-safe message on invalid input.
+    `lang` must be one of `allowed_langs`.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("settings must be a JSON object")
+
+    if "lang" in data and data["lang"] not in (None, ""):
+        lang = data["lang"]
+        if not isinstance(lang, str) or lang not in allowed_langs:
+            raise ValueError(f"lang must be one of: {', '.join(allowed_langs)}")
+        cfg.lang = lang
+
+    for key, (lo, hi) in _INT_BOUNDS.items():
+        if key not in data or data[key] in (None, ""):
+            continue
+        v = data[key]
+        if isinstance(v, bool) or not isinstance(v, int):
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} must be an integer")
+        if not (lo <= v <= hi):
+            raise ValueError(f"{key} must be between {lo} and {hi}")
+        setattr(cfg, key, v)
+
+    if "commit_patterns" in data and data["commit_patterns"] is not None:
+        patterns = data["commit_patterns"]
+        if isinstance(patterns, str):
+            patterns = [p for p in patterns.splitlines() if p.strip()]
+        if not isinstance(patterns, list) or not patterns:
+            raise ValueError("commit_patterns must be a non-empty list of regex strings")
+        if len(patterns) > _MAX_PATTERNS:
+            raise ValueError(f"commit_patterns: at most {_MAX_PATTERNS} patterns")
+        import re
+        for p in patterns:
+            if not isinstance(p, str) or len(p) > _MAX_PATTERN_LEN:
+                raise ValueError(f"each commit pattern must be a string of at most {_MAX_PATTERN_LEN} chars")
+            try:
+                re.compile(p)
+            except re.error as e:
+                raise ValueError(f"invalid commit regex {p!r}: {e}")
+        cfg.commit_patterns = list(patterns)
+
+    return cfg

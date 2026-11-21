@@ -47,12 +47,21 @@ def resolve_project(conn: sqlite3.Connection, ref: str | None):
 
 def guard(fn, *args, **kwargs):
     """THE single CLI error boundary: run a core call and turn domain errors
-    (KeyError = unknown id/ref, ValueError = invalid value) into a clean
-    `Invalid value: ...` message instead of a raw traceback. Every command
-    uses this — no per-command try/except anywhere else."""
+    into a clean `Invalid value: ...` message instead of a raw traceback.
+    KeyError = unknown id/ref, ValueError = invalid value, GitError = broken
+    repo, IntegrityError = constraint (duplicate, bad FK), TypeError = caller
+    passed a wrong type. Every command uses this — no per-command try/except."""
+    from devdash.core.gitwatch import GitError
+
     try:
         return fn(*args, **kwargs)
     except KeyError as e:
         raise typer.BadParameter(e.args[0] if e.args else "not found") from e
     except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+    except GitError as e:
+        raise typer.BadParameter(str(e)) from e
+    except sqlite3.IntegrityError as e:
+        raise typer.BadParameter(f"constraint violation: {e}") from e
+    except TypeError as e:
         raise typer.BadParameter(str(e)) from e

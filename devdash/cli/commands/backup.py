@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -24,10 +23,7 @@ from ..output import emit
 console = Console()
 
 # whitelist of exported tables (fixed names -> no SQL injection possible)
-EXPORT_TABLES = [
-    "meta", "projects", "features", "tasks", "sessions",
-    "log_entries", "git_links", "git_commits", "git_sync_state",
-]
+from devdash.core.backup import EXPORT_TABLES  # noqa: E402  (shared with core)
 
 
 def backup_cmd(
@@ -35,36 +31,11 @@ def backup_cmd(
     out: str | None = typer.Option(None, "--out", "-o", help=tr("opt.out_backup")),
 ) -> None:
     """Create a timestamped zip backup of the whole DevDash home (db + config)."""
-    home = cfgmod.devdash_home()
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    outdir = Path(out).expanduser() if out else Path.cwd()
-    outdir.mkdir(parents=True, exist_ok=True)
-    zip_path = outdir / f"devdash-backup-{ts}.zip"
+    from devdash.core.backup import make_backup
 
-    # consistent snapshot of a possibly-WAL database (safe while the GUI runs)
-    tmp = outdir / f".devdash-snapshot-{ts}.db"
-    src = db.connect(cfgmod.db_path(home))
-    try:
-        dst = sqlite3.connect(str(tmp))
-        src.backup(dst)
-        dst.close()
-    finally:
-        src.close()
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(tmp, "devdash.db")
-        cfg_path = cfgmod.config_path(home)
-        if cfg_path.exists():
-            z.write(cfg_path, "config.json")
-    tmp.unlink(missing_ok=True)
-
-    data = {
-        "path": str(zip_path),
-        "bytes": zip_path.stat().st_size,
-        "files": ["devdash.db", "config.json"],
-    }
+    data = make_backup(out_dir=out)
     emit(ctx, data, lambda: console.print(
-        tr("backup.line", path=zip_path, kb=f"{data['bytes'] / 1024:.1f}")
+        tr("backup.line", path=data["path"], kb=f"{data['bytes'] / 1024:.1f}")
     ))
 
 
@@ -76,31 +47,11 @@ def export_cmd(
 
     Read-only: never touches the database. The zip `backup` is for restore;
     this JSON is for reading the data outside DevDash."""
-    home = cfgmod.devdash_home()
-    conn = db.connect(cfgmod.db_path(home))
-    db.init_db(conn)
-    payload = {
-        "exported_at": now_iso(),
-        "schema_version": db.SCHEMA_VERSION,
-        "tables": {},
-    }
-    for table in EXPORT_TABLES:
-        try:
-            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
-        except sqlite3.Error:
-            rows = []
-        payload["tables"][table] = [dict(r) for r in rows]
-    conn.close()
+    from devdash.core.backup import export_json
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = Path(out).expanduser() if out else Path.cwd() / f"devdash-export-{ts}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=1, default=str),
-                    encoding="utf-8")
-    n = sum(len(v) for v in payload["tables"].values())
-    data = {"path": str(path), "rows": n, "tables": sorted(payload["tables"])}
+    data = export_json(out_dir=out)
     emit(ctx, data, lambda: console.print(
-        tr("export.line", path=path, rows=n)
+        tr("export.line", path=data["path"], rows=data["rows"])
     ))
 
 

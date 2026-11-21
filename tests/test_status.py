@@ -1,4 +1,4 @@
-"""Stats + status snapshot tests (step g)."""
+"""Stats + status snapshot tests."""
 
 from __future__ import annotations
 

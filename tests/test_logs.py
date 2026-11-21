@@ -1,4 +1,4 @@
-"""Core devlog tests (step e): add (default active project), search, list
+"""Core devlog tests: add (default active project), search, list
 filters, update, events.
 """
 

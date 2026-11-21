@@ -1,4 +1,4 @@
-"""`devdash stats ...` commands (step j): time, tasks, streak, tags."""
+"""`devdash stats ...` commands: time, tasks, streak, tags."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from devdash.core import projects, sessions, stats, tasks as tsk
+from devdash.core import projects, sessions, stats
 from devdash.core.i18n import tr, tr_cols
 from ..deps import get_conn, resolve_project
 from ..output import emit
@@ -38,10 +38,10 @@ def _minutes_block(conn, pid, days: int) -> dict:
 def today_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
     """Today: minutes worked, tasks done, current session, streak."""
     conn, pid = _pid(ctx, project)
-    done_today = [t for t in tsk.list(conn, project_id=pid, status="done")
-                  if (t.completed_at or "")[:10] == stats.today_str()]
+    # local-day boundary, same as the GUI/status (not a raw UTC date slice)
+    done_today = stats.tasks_done_today(conn, pid)
     s = sessions.current(conn)
-    data = {**_minutes_block(conn, pid, 1), "tasks_done_today": len(done_today),
+    data = {**_minutes_block(conn, pid, 1), "tasks_done_today": done_today,
             "session_running": s is not None}
 
     def render() -> None:

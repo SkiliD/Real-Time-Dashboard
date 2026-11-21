@@ -1,4 +1,4 @@
-"""CLI tests (step b): projects + tasks commands, human and --json output.
+"""CLI tests: projects + tasks commands, human and --json output.
 
 Uses typer's CliRunner with an isolated DEVDASH_HOME per test.
 """

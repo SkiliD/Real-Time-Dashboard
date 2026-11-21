@@ -1,4 +1,4 @@
-"""`devdash log ...` commands (step e): the devlog (dated, searchable journal)."""
+"""`devdash log ...` commands: the devlog (dated, searchable journal)."""
 
 from __future__ import annotations
 
@@ -80,3 +80,32 @@ def search_cmd(
     rows = core.search(conn, text, project_id=pid, limit=limit)
     emit(ctx, {"query": text, "count": len(rows), "entries": [r.to_dict() for r in rows]},
          lambda: _render_log_table(rows))
+
+
+@app.command("edit", help=tr("log.edit.help"))
+def edit_log(
+    ctx: typer.Context,
+    entry_id: int = typer.Argument(..., help=tr("opt.id")),
+    content: str = typer.Argument(..., help=tr("opt.content")),
+) -> None:
+    """Replace the content of a devlog entry."""
+    conn = get_conn(ctx)
+    entry = guard(core.update, conn, entry_id, content=content)
+    emit(ctx, entry.to_dict(), lambda: console.print(tr("log.updated", id=entry.id)))
+
+
+@app.command("delete", help=tr("log.delete.help"))
+def delete_log(
+    ctx: typer.Context,
+    entry_id: int = typer.Argument(..., help=tr("opt.id")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=tr("opt.yes")),
+) -> None:
+    """Delete a devlog entry (asks for confirmation unless --yes)."""
+    conn = get_conn(ctx)
+    entry = core.get(conn, entry_id)
+    if entry is None:
+        raise typer.BadParameter(tr("err.no_log_entry", id=entry_id))
+    if not yes and not typer.confirm(tr("log.delete.confirm", id=entry_id)):
+        raise typer.Abort()
+    guard(core.delete, conn, entry_id)
+    emit(ctx, {"deleted": entry_id}, lambda: console.print(tr("log.deleted", id=entry_id)))

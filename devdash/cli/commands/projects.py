@@ -1,4 +1,4 @@
-"""`devdash projects ...` commands (step b)."""
+"""`devdash projects ...` commands."""
 
 from __future__ import annotations
 
@@ -79,6 +79,46 @@ def create_project(
     ))
 
 
+@app.command("connect", help=tr("projects.connect.help"))
+def connect_project(
+    ctx: typer.Context,
+    path: str = typer.Argument(..., help=tr("opt.path_folder")),
+    name: str = typer.Option("", "--name", "-n", help=tr("opt.name")),
+    description: str = typer.Option("", "--description", "-d"),
+    engine: str = typer.Option("", "--engine", "-e",
+                                help=tr("opt.engine", list=", ".join(_ENGINES)) + " (défaut: auto-détecté)"),
+    color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
+    status: str = typer.Option("idea", "--status", "-s", help=tr("opt.status", list=", ".join(_STATUSES))),
+    set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
+    no_git: bool = typer.Option(False, "--no-git", help=tr("opt.no_git")),
+) -> None:
+    """Connect DevDash to an EXISTING project folder: engine auto-detected from
+    marker files, name suggested from the folder, git repo auto-linked (read-only)."""
+    from devdash.core import detect, gitwatch
+    from devdash.core import config as cfgmod
+
+    conn = get_conn(ctx)
+    info = detect.detect_project(path)
+    if not info["is_dir"]:
+        raise typer.BadParameter(tr("err.not_a_dir", path=path))
+    eng = (engine or info["engine"] or "other").lower()
+    if eng not in _ENGINES:
+        raise typer.BadParameter(tr("err.bad_engine", engine=eng, list=", ".join(_ENGINES)))
+    project = guard(core.create, conn, name or info["name"] or info["path"],
+                    description=description, engine=eng, color=color, status=status)
+    if set_active:
+        core.set_active(conn, project.id)
+    git_root = None
+    if not no_git and info["git_root"]:
+        git_root = guard(gitwatch.link, conn, project.id, info["git_root"])
+        guard(gitwatch.sync_repo, conn, git_root, cfgmod.load_config().commit_patterns)
+    emit(ctx, {"project": project.to_dict(), "detected": info, "git_root": git_root},
+         lambda: console.print(
+             tr("projects.connected", name=project.name, engine=project.engine,
+                path=info["path"], git=git_root or tr("projects.connected.no_git"))
+         ))
+
+
 @app.command("set-active", help=tr("projects.set_active.help"))
 def set_active(
     ctx: typer.Context,
@@ -153,4 +193,24 @@ def archive_project(
     state = tr("state.restored") if unarchive else tr("state.archived")
     emit(ctx, project.to_dict(), lambda: console.print(
         tr("projects.archived", slug=project.slug, state=state)
+    ))
+
+
+@app.command("delete", help=tr("projects.delete.help"))
+def delete_project(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help=tr("opt.ref_project")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=tr("opt.yes")),
+) -> None:
+    """Permanently delete a project AND its tasks/devlog/sessions/features.
+    Asks for confirmation unless --yes. Imported git commits are kept."""
+    conn = get_conn(ctx)
+    project = core.get(conn, int(ref) if ref.isdigit() else ref)
+    if project is None:
+        raise typer.BadParameter(tr("err.no_project", ref=ref))
+    if not yes and not typer.confirm(tr("projects.delete.confirm", slug=project.slug)):
+        raise typer.Abort()
+    guard(core.delete, conn, project.id)
+    emit(ctx, {"deleted": project.slug}, lambda: console.print(
+        tr("projects.deleted", slug=project.slug)
     ))
