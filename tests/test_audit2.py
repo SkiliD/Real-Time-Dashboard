@@ -183,6 +183,43 @@ def test_api_int_clamp_and_confined_out(home):
         api.update_now({})  # missing confirm -> 400
 
 
+# --- task deletion (core + CLI + GUI wiring) ---------------------------------
+
+def test_task_delete_cascades_subtasks(home):
+    with conn(home) as c:
+        p = projects.create(c, "P")
+        t = tasks.add(c, p.id, "parent")
+        sub = tasks.add(c, p.id, "child")
+        tasks.update(c, sub.id, parent_id=t.id)
+        tasks.delete(c, t.id)
+        assert tasks.get(c, t.id) is None
+        assert tasks.get(c, sub.id) is None  # ON DELETE CASCADE
+        with pytest.raises(KeyError):
+            tasks.delete(c, t.id)
+
+
+def test_cli_task_delete(home):
+    runner.invoke(app, ["--json", "projects", "create", "P", "--set-active"])
+    tid = json.loads(runner.invoke(app, ["--json", "task", "add", "x"]).output)["id"]
+    r = runner.invoke(app, ["--json", "task", "delete", str(tid), "--yes"])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.output)["deleted"] == tid
+    r = runner.invoke(app, ["--json", "task", "list"])
+    assert json.loads(r.output)["count"] == 0
+
+
+def test_gui_task_delete_wiring():
+    from devdash.gui.api import Api
+    html = (ROOT / "devdash" / "gui" / "static" / "index.html").read_text(encoding="utf-8")
+    js = (ROOT / "devdash" / "gui" / "static" / "app.js").read_text(encoding="utf-8")
+    srv = (ROOT / "devdash" / "gui" / "server.py").read_text(encoding="utf-8")
+    assert 'id="btn-delete-task"' in html
+    assert '$("#btn-delete-task")' in js and "/api/tasks/delete" in js
+    assert '"/api/tasks/delete"' in srv and "def tasks_delete" in (
+        ROOT / "devdash" / "gui" / "api.py").read_text(encoding="utf-8")
+    assert Api._int("5", "id") == 5  # endpoint parses id through the same helper
+
+
 # --- GUI static: the audit-2 regression guards --------------------------------
 
 def test_render_features_is_async_and_title_span_exists():

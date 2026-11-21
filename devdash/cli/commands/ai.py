@@ -35,6 +35,10 @@ def _run(ctx, fn, *args, **kwargs):
         # a clean runtime error, not a usage error: message + exit 1 (not BadParameter/exit 2)
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
+    except KeyError as e:
+        # unknown id/ref inside an AI call: same clean treatment
+        typer.echo(e.args[0] if e.args else "not found", err=True)
+        raise typer.Exit(1) from e
 
 
 @app.command("context", help=tr("ai.context.help"))
@@ -120,5 +124,32 @@ def verdict_cmd(
             console.print(tr("ai.verdict.proposed", name=r["feature"]["name"]))
         else:
             console.print(tr("ai.verdict.none", status=r["feature"]["status"]))
+
+    emit(ctx, r, render)
+
+
+@app.command("verify", help=tr("ai.verify.help"))
+def verify_cmd(
+    ctx: typer.Context,
+    task_id: int = typer.Argument(..., help=tr("opt.id")),
+    apply: bool = typer.Option(False, "--apply", help=tr("opt.apply_verify")),
+) -> None:
+    """AI verdict on a TASK: is its objective met? (commits, devlog, sessions).
+    Read-only by default. --apply marks it done ONLY on a confident positive verdict."""
+    r = _run(ctx, assistant.task_verdict, task_id, apply=apply)
+    _cloud_warning(cfgmod.load_config())
+
+    def render() -> None:
+        v = r["verdict"]
+        verdict = tr("verdict.complete") if v.get("seems_complete") else tr("verdict.incomplete")
+        console.print(tr("ai.verify.line", id=task_id, verdict=verdict,
+                         pct=int(round(v.get("confidence", 0) * 100))))
+        console.print(tr("ai.verdict.reasoning", text=v.get("reasoning")))
+        for ev in v.get("evidence", []):
+            console.print(f"  • {ev}")
+        if r["applied"]:
+            console.print(tr("ai.verify.applied", id=task_id))
+        elif apply:
+            console.print(tr("ai.verify.not_applied", id=task_id))
 
     emit(ctx, r, render)

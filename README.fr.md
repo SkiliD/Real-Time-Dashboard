@@ -132,7 +132,7 @@ watcher en arrière-plan relève toutes les 20 secondes.
 | voir tes stats | `devdash status` · `devdash stats week` · `devdash stats streak` |
 | tout sauvegarder | `devdash backup --out D:\backups` (zip horodaté) |
 | exporter / réimporter les données | `devdash export --out export.json` · `devdash import export.json` |
-| de l'aide IA | `devdash ai ask "où en suis-je ?"` · `devdash ai plan "système de combat" --apply` · `devdash ai context` |
+| de l'aide IA | `devdash ai ask "où en suis-je ?"` · `devdash ai plan "système de combat" --apply` · `devdash ai verify 3` · `devdash ai context` |
 | connecter un agent IA (Claude Code…) | `devdash mcp` — voir ci-dessous |
 
 ## Mettre à jour après un `git pull`

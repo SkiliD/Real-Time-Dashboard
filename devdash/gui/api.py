@@ -250,6 +250,18 @@ class Api:
                 raise ApiError(str(e))
             return t.to_dict()
 
+    def tasks_delete(self, body: dict) -> dict:
+        """Hard-delete a task (subtasks cascade). Explicit user action only."""
+        tid = self._int(body.get("id"), "id")
+        if tid is None:
+            raise ApiError("id is required")
+        with self._conn() as c:
+            try:
+                t = tsk.delete(c, tid)
+            except KeyError:
+                raise ApiError(f"no task #{tid}", status=404)
+            return {"deleted": t.id, "title": t.title}
+
     def tasks_add(self, body: dict) -> dict:
         title = body.get("title", "").strip()
         if not title:
@@ -536,6 +548,22 @@ class Api:
         if not ref:
             raise ApiError("ref is required")
         return self._ai_call(assistant.feature_verdict, ref)
+
+    def ai_task_verdict(self, body: dict) -> dict:
+        """AI verdict on a task. The GUI NEVER applies it: apply is refused here
+        on purpose — the approve button in the modal performs the status change
+        itself, so a human always makes the final call."""
+        from devdash.core.ai.provider import AIDisabledError, AIError
+        tid = self._int(body.get("id"), "id")
+        if tid is None:
+            raise ApiError("id is required")
+        with self._conn() as c:
+            try:
+                return assistant.task_verdict(c, tid, apply=False, home=self.home)
+            except (AIDisabledError, AIError) as e:
+                raise ApiError(str(e), status=400)
+            except KeyError:
+                raise ApiError(f"no task #{tid}", status=404)
 
     # --- features ---------------------------------------------------
 

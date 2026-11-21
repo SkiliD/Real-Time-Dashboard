@@ -190,6 +190,7 @@
           <label class="chk"><input type="checkbox" id="flag-summarize"> <span data-i18n="gui.set.flag.summarize">Résumé de semaine</span></label>
           <label class="chk"><input type="checkbox" id="flag-plan"> <span data-i18n="gui.set.flag.plan">Découpage de tâches</span></label>
           <label class="chk"><input type="checkbox" id="flag-verdict"> <span data-i18n="gui.set.flag.feature_verdict">Verdict sur les features</span></label>
+          <label class="chk"><input type="checkbox" id="flag-task-verdict"> <span data-i18n="gui.set.flag.task_verdict">Verdict sur les tâches</span></label>
         </fieldset>
 
         <div id="cfg-cloud-warn" class="cloud-warn hidden" data-i18n="gui.set.cloud_warn"></div>
@@ -336,7 +337,13 @@
     <label><span data-i18n="gui.est_title">Estimation (min)</span> <input id="t-est" type="number" min="0" step="5"></label>
     <label><span data-i18n="gui.task.parent">Tâche parente</span> <select id="t-parent"><option value="" data-i18n="gui.task.none">— aucune —</option></select></label>
     <label><span data-i18n="gui.task.feature">Feature liée</span> <select id="t-feature"><option value="" data-i18n="gui.task.none">— aucune —</option></select></label>
+    <div id="task-verdict-box" class="hidden">
+      <button id="btn-task-verify" class="btn btn-sm">🤖 <span data-i18n="gui.task.verify">Vérifier avec l’IA</span></button>
+      <div id="task-verdict-result" class="dim small"></div>
+      <button id="btn-task-verify-approve" class="btn btn-sm btn-primary hidden" data-i18n="gui.task.verify_approve">✔ Approuver et marquer terminée</button>
+    </div>
     <div class="modal-actions">
+      <button id="btn-delete-task" class="btn btn-danger" data-i18n="gui.task.delete">Supprimer…</button>
       <span class="spacer"></span>
       <button id="btn-cancel-task" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
       <button id="btn-save-task" class="btn btn-primary" data-i18n="gui.edit.save">Enregistrer</button>

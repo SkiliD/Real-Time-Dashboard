@@ -126,6 +126,23 @@ def list(
     return [Task.from_row(r) for r in rows]
 
 
+def delete(conn: sqlite3.Connection, task_id: int) -> Task:
+    """Hard-delete a task (explicit human action; the GUI/CLI confirm first).
+
+    Subtasks cascade (parent_id ON DELETE CASCADE), feature_id is set to NULL,
+    and git commit references stay (no FK by design). The task's events are
+    cleaned up in the same transaction.
+    """
+    task = get(conn, task_id)
+    if task is None:
+        raise KeyError(f"no task with id {task_id}")
+    with conn:  # one transaction: bus cleanup + row delete (subtasks cascade)
+        conn.execute("DELETE FROM events WHERE entity = 'task' AND entity_id = ?", (task.id,))
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task.id,))
+    events.append(conn, "task", task.id, "deleted", {"id": task.id})
+    return task
+
+
 def set_status(conn: sqlite3.Connection, task_id: int, status: str) -> Task:
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")

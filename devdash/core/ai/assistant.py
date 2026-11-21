@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 
 from .. import config as cfgmod
-from .. import features, gitwatch, projects, stats
+from .. import features, gitwatch, logs, projects, stats
 from .. import i18n
 from .. import tasks as tsk
 from . import context as ctx_mod
@@ -34,6 +34,16 @@ VERDICT_SYSTEM = (
     '{"seems_complete": bool, "confidence": 0..1, "reasoning": str en français}. '
     "Ne marque JAMAIS la feature comme terminée toi-même: tu donnes juste un verdict."
 )
+TASK_VERDICT_SYSTEM = (
+    "Tu es un assistant qui évalue si une tâche de développement est réellement terminée, "
+    "en croisant la tâche, ses sous-tâches, les commits qui y sont liés, le devlog et les sessions de travail. "
+    "Réponds UNIQUEMENT un JSON valide: "
+    '{"seems_complete": bool, "confidence": 0..1, "reasoning": str en français, "evidence": [str]}. '
+    "Sois strict: une tâche est complète seulement si l'objectif décrit est atteint et vérifiable. "
+    "Ne marque JAMAIS la tâche comme terminée toi-même: tu donnes juste un verdict."
+)
+# apply=True (explicit --apply consent) only marks a task done above this confidence
+VERDICT_APPLY_MIN_CONFIDENCE = 0.7
 
 
 def _cfg_and_provider(home: Path | None):
@@ -220,4 +230,65 @@ def feature_verdict(conn: sqlite3.Connection, ref, home: Path | None = None) -> 
                              reasoning=verdict.get("reasoning") if isinstance(verdict.get("reasoning"), str) else None)
         proposed = True
     return {"verdict": verdict, "feature": f.to_dict(), "proposed": proposed,
+            "provider": provider.name, "cloud": ai_status(cfg)["cloud"]}
+
+
+def task_verdict(conn: sqlite3.Connection, task_id: int, apply: bool = False,
+                 home: Path | None = None) -> dict:
+    """Cross task + subtasks + linked commits + devlog + work sessions to emit a
+    verdict on whether a TASK's objective is met.
+
+    SAFETY: read-only by default. apply=True is the explicit human consent
+    (CLI --apply only — the GUI never sends it; its approve button performs the
+    status change itself): the task is marked done ONLY if the model says
+    seems_complete with confidence >= VERDICT_APPLY_MIN_CONFIDENCE.
+    """
+    cfg, provider = _cfg_and_provider(home)
+    _flag(cfg, "task_verdict", home)
+    t = tsk.get(conn, task_id)
+    if t is None:
+        raise KeyError(f"no task #{task_id}")
+    children = [x for x in tsk.list(conn, project_id=t.project_id) if x.parent_id == t.id]
+    repo = gitwatch.get_link(conn, t.project_id)
+    commits = []
+    if repo:
+        commits = [{"short": c.short, "message": c.message, "at": c.committed_at}
+                   for c in gitwatch.commits(conn, repo_path=repo, task_id=t.id, limit=20)]
+    devlog = [{"at": e.created_at, "content": e.content[:200]}
+              for e in logs.list(conn, task_id=t.id, limit=20)]
+    sess_rows = conn.execute(
+        "SELECT kind, started_at, duration_min, note FROM sessions "
+        "WHERE task_id = ? ORDER BY started_at DESC LIMIT 20", (t.id,),
+    ).fetchall()
+    proj = projects.get(conn, t.project_id)
+    payload = {
+        "project": proj.slug if proj else None,
+        "task": t.to_dict(),
+        "subtasks": [{"id": s.id, "title": s.title, "status": s.status} for s in children],
+        "linked_commits": commits,
+        "devlog_entries": devlog,
+        "work_sessions": [{"kind": r["kind"], "minutes": r["duration_min"], "note": r["note"]}
+                          for r in sess_rows],
+    }
+    messages = [
+        {"role": "system", "content": TASK_VERDICT_SYSTEM},
+        {"role": "user", "content": "Données tâche:\n" + json.dumps(payload, ensure_ascii=False, default=str)},
+    ]
+    raw = provider.chat(messages, temperature=0.2)
+    raw_verdict = _extract_json(raw, home)
+    # validate/normalize the model shape (never trust it blindly)
+    conf = raw_verdict.get("confidence")
+    conf = float(conf) if isinstance(conf, (int, float)) and not isinstance(conf, bool) else 0.0
+    verdict = {
+        "seems_complete": bool(raw_verdict.get("seems_complete")),
+        "confidence": max(0.0, min(1.0, conf)),
+        "reasoning": raw_verdict.get("reasoning") if isinstance(raw_verdict.get("reasoning"), str) else "",
+        "evidence": [str(x) for x in (raw_verdict.get("evidence") or []) if isinstance(x, str)][:10],
+    }
+    applied = False
+    if apply and verdict["seems_complete"] and verdict["confidence"] >= VERDICT_APPLY_MIN_CONFIDENCE \
+            and t.status != "done":
+        t = tsk.set_status(conn, t.id, "done")  # explicit consent was given via apply=True
+        applied = True
+    return {"verdict": verdict, "task": t.to_dict(), "applied": applied,
             "provider": provider.name, "cloud": ai_status(cfg)["cloud"]}

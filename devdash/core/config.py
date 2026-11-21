@@ -48,6 +48,7 @@ class Config:
     ai_context_max_chars: int = 6000  # max size of the compact context sent to the model
     ai_feature_flags: dict = field(default_factory=lambda: {
         "chat": True, "summarize": True, "plan": True, "feature_verdict": True,
+        "task_verdict": True,
     })
 
     # --- git commit message parsing ---

@@ -128,7 +128,7 @@ new Git commits, which a background watcher picks up every 20 seconds.
 | see your stats | `devdash status` · `devdash stats week` · `devdash stats streak` |
 | back up everything | `devdash backup --out D:\backups` (timestamped zip) |
 | export / re-import data | `devdash export --out export.json` · `devdash import export.json` |
-| AI help | `devdash ai ask "where do I stand?"` · `devdash ai plan "combat system" --apply` · `devdash ai context` |
+| AI help | `devdash ai ask "where do I stand?"` · `devdash ai plan "combat system" --apply` · `devdash ai verify 3` · `devdash ai context` |
 | connect an AI agent (Claude Code…) | `devdash mcp` — see below |
 
 ## Updating after a `git pull`

@@ -559,6 +559,21 @@ FR: dict[str, str] = {
     "opt.yes": "Confirmer sans demander (scripts / non interactif)",
     "err.no_log_entry": "aucune entrée de devlog #{id}",
     "gui.upd.confirm": "⚠ Cliquer encore pour lancer la mise à jour",
+    "task.delete.help": "Supprimer définitivement une tâche (les sous-tâches suivent).",
+    "task.delete.confirm": "Supprimer définitivement la tâche #{id} « {title} » ?",
+    "task.deleted": "[red]✖[/] tâche #{id} supprimée.",
+    "gui.task.delete": "Supprimer…",
+    "gui.task.delete_confirm": "⚠ Cliquer encore pour supprimer définitivement",
+    "gui.toast.task_deleted": "✖ Tâche #{id} supprimée",
+    # --- AI task verdict ---
+    "ai.verify.help": "Verdict IA sur une tâche : l'objectif est-il atteint ? (commits, devlog, sessions). Lecture seule sauf --apply.",
+    "opt.apply_verify": "Marquer la tâche terminée SI le verdict est positif et confiant (consentement explicite)",
+    "ai.verify.line": "Tâche #{id} : {verdict} (confiance {pct}%)",
+    "ai.verify.applied": "[green]✔[/] Tâche #{id} marquée terminée (verdict positif, --apply).",
+    "ai.verify.not_applied": "Verdict insuffisant pour --apply : tâche laissée telle quelle (décision humaine requise).",
+    "gui.task.verify": "Vérifier avec l’IA",
+    "gui.task.verify_approve": "✔ Approuver et marquer terminée",
+    "gui.set.flag.task_verdict": "Verdict sur les tâches",
 }
 
 EN: dict[str, str] = {
@@ -1084,6 +1099,21 @@ EN: dict[str, str] = {
     "opt.yes": "Confirm without asking (scripts / non-interactive)",
     "err.no_log_entry": "no devlog entry #{id}",
     "gui.upd.confirm": "⚠ Click again to start the update",
+    "task.delete.help": "Permanently delete a task (subtasks go with it).",
+    "task.delete.confirm": "Permanently delete task #{id} “{title}”?",
+    "task.deleted": "[red]✖[/] task #{id} deleted.",
+    "gui.task.delete": "Delete…",
+    "gui.task.delete_confirm": "⚠ Click again to permanently delete",
+    "gui.toast.task_deleted": "✖ Task #{id} deleted",
+    # --- AI task verdict ---
+    "ai.verify.help": "AI verdict on a task: is its objective met? (commits, devlog, sessions). Read-only unless --apply.",
+    "opt.apply_verify": "Mark the task done IF the verdict is positive and confident (explicit consent)",
+    "ai.verify.line": "Task #{id}: {verdict} (confidence {pct}%)",
+    "ai.verify.applied": "[green]✔[/] Task #{id} marked done (positive verdict, --apply).",
+    "ai.verify.not_applied": "Verdict not strong enough for --apply: task left as-is (human decision required).",
+    "gui.task.verify": "Check with AI",
+    "gui.task.verify_approve": "✔ Approve and mark done",
+    "gui.set.flag.task_verdict": "Task verdict",
 }
 
 MESSAGES: dict[str, dict[str, str]] = {"fr": FR, "en": EN}

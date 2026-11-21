@@ -33,11 +33,33 @@ def test_new_ux_styles_present_in_css():
         assert sel in CSS, f"missing CSS for {sel}"
 
 
+def test_all_modal_overlays_are_fixed_positioned():
+    # a modal that renders in page flow appears "below the page": every modal
+    # container must share the fixed overlay rule
+    m = re.search(r"(#modal[^{]*)\{\s*position:\s*fixed", CSS)
+    assert m, "no fixed overlay rule found"
+    selector = m.group(1)
+    for mid in ["#modal", "#modal-edit", "#modal-task", "#modal-help"]:
+        assert mid in selector, f"{mid} missing from the fixed overlay selector"
+    assert "max-height" in CSS, "modal-card must scroll when taller than the viewport"
+
+
 def test_app_js_uses_new_ux_hooks():
     for needle in ["openPalette", "closePalette", "paletteKey", "timeAgo(", "notify(",
                    "saveUi(", "loadUi(", 'addEventListener("keydown"', "localStorage",
                    "btn-copy-task-id", "session-eta"]:
         assert needle in JS, f"app.js missing {needle}"
+
+
+def test_switching_to_settings_tab_loads_the_forms():
+    # settings are loaded lazily (skipped on polls from other tabs), so switchTab
+    # itself must trigger the load — otherwise the form renders empty
+    m = re.search(r"function switchTab\(tab\) \{(.*?)\n\}", JS, flags=re.S)
+    assert m, "switchTab not found"
+    body = m.group(1)
+    assert 'tab === "settings"' in body
+    for fn in ["loadAiConfig(", "loadSettings(", "loadUpdateStatus("]:
+        assert fn in body, f"switchTab does not call {fn}"
 
 
 def test_all_i18n_keys_used_in_html_exist_in_both_langs():

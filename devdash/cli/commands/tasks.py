@@ -194,3 +194,20 @@ def edit_task(
     emit(ctx, task.to_dict(), lambda: console.print(
         tr("task.updated", id=task.id, title=task.title)
     ))
+
+
+@app.command("delete", help=tr("task.delete.help"))
+def delete_task(
+    ctx: typer.Context,
+    task_id: int = typer.Argument(..., help=tr("opt.id")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=tr("opt.yes")),
+) -> None:
+    """Permanently delete a task (subtasks go with it). Asks unless --yes."""
+    conn = get_conn(ctx)
+    task = core.get(conn, task_id)
+    if task is None:
+        raise typer.BadParameter(tr("err.no_task", id=task_id))
+    if not yes and not typer.confirm(tr("task.delete.confirm", id=task_id, title=task.title)):
+        raise typer.Abort()
+    guard(core.delete, conn, task_id)
+    emit(ctx, {"deleted": task_id}, lambda: console.print(tr("task.deleted", id=task_id)))

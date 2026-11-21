@@ -139,6 +139,7 @@ for machine-readable output.
 | `task list` | `devdash task list -s todo --priority high --tag ui --feature dash` | filters: status/priority/tag/feature |
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | status change |
 | `task edit <id>` | `devdash task edit 3 --priority critical --tag vfx` | edit |
+| `task delete <id>` | `devdash task delete 3 --yes` | permanent delete (subtasks cascade) |
 | `session start` | `devdash session start --task 3 --kind focus --pomodoro` | interactive timer; `--background` to return the prompt, `--pomodoro` = after focus, offers to auto-start the break |
 | `session stop` | `devdash session stop --note "done: X, blocked: Y"` | duration + end note |
 | `session now` / `session list` | `devdash session list --week` | running session / history (`--today`, `--week`, `-t <task id>`) |
@@ -158,6 +159,7 @@ for machine-readable output.
 | `ai summarize` | `devdash ai summarize --period week` | weekly summary |
 | `ai plan` | `devdash ai plan "combat system" --apply` | breaks down into subtasks (`--apply` = the only possible write) |
 | `ai verdict` | `devdash ai verdict dash` | AI validation proposal (never automatic) |
+| `ai verify <id>` | `devdash ai verify 3 [--apply]` | AI verdict on a task (objective met?) — read-only, except explicit `--apply` |
 | `demo seed` | `devdash demo seed` | demo data (`--force` if projects already exist) |
 | `backup` | `devdash backup --out D:\backups` | **timestamped zip** of `~/.devdash` (db + config), consistent SQLite snapshot even with the GUI open |
 | `export` | `devdash export --out export.json` | **full JSON export** (all tables) for archive/migration/inspection — read-only |

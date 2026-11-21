@@ -220,6 +220,7 @@ function fillAiForm() {
   $("#flag-summarize").checked = !!fl.summarize;
   $("#flag-plan").checked = !!fl.plan;
   $("#flag-verdict").checked = !!fl.feature_verdict;
+  $("#flag-task-verdict").checked = !!fl.task_verdict;
   $("#cfg-path").textContent = T("gui.set.config_path", { path: cfg.config_path || "" });
   updateProviderFields();
 }
@@ -247,6 +248,7 @@ function readAiForm() {
     summarize: $("#flag-summarize").checked,
     plan: $("#flag-plan").checked,
     feature_verdict: $("#flag-verdict").checked,
+    task_verdict: $("#flag-task-verdict").checked,
   };
   return {
     ai_enabled: $("#cfg-enabled").checked,
@@ -611,6 +613,17 @@ function openTaskModal(t) {
   $("#t-feature").innerHTML = `<option value="">${T("gui.task.none")}</option>` +
     (state.features || []).map((f) => `<option value="${f.id}">⚑ ${escapeHtml(f.name)}</option>`).join("");
   $("#t-feature").value = t.feature_id || "";
+  // reset the delete button to its un-armed state
+  const delBtn = $("#btn-delete-task");
+  delBtn.dataset.armed = "";
+  delBtn.textContent = T("gui.task.delete");
+  delBtn.classList.remove("btn-danger-armed");
+  // reset the AI verdict box; show it only when the AI (and the flag) is on
+  const aiVerdictOn = state.ai.enabled && (state.ai.flags || {}).task_verdict !== false;
+  $("#task-verdict-box").classList.toggle("hidden", !aiVerdictOn);
+  $("#task-verdict-result").textContent = "";
+  $("#btn-task-verify-approve").classList.add("hidden");
+  state.taskVerdict = null;
   $("#modal-task").classList.remove("hidden");
   $("#t-title").focus();
 }
@@ -1259,6 +1272,13 @@ function switchTab(tab) {
   $("#tab-settings").classList.toggle("hidden", tab !== "settings");
   $("#tab-stats").classList.toggle("hidden", tab !== "stats");
   if (tab === "stats") renderStats(); // charts are only built while the tab is visible
+  if (tab === "settings") {
+    // settings are loaded lazily (skipped on polls while on other tabs), so
+    // switching TO this tab must trigger the load explicitly
+    runAction(async () => {
+      await Promise.all([loadAiConfig(), loadSettings(), loadUpdateStatus()]);
+    });
+  }
 }
 
 /* ---------- wiring ---------- */
@@ -1284,6 +1304,54 @@ $("#filter-search").addEventListener("input", async (e) => {
 $("#git-task-filter").onchange = async (e) => { state.gitTaskFilter = e.target.value; await runAction(async () => { await loadGit(); renderGit(); }); };
 $("#btn-cancel-task").onclick = closeTaskModal;
 $("#btn-save-task").onclick = () => runAction(saveTaskModal);
+// two-step delete: first click arms the button, second click deletes for real
+$("#btn-delete-task").onclick = () => {
+  const id = state.editingTaskId;
+  if (id == null) return;
+  const btn = $("#btn-delete-task");
+  if (btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1";
+    btn.textContent = T("gui.task.delete_confirm");
+    btn.classList.add("btn-danger-armed");
+    setTimeout(() => {
+      btn.dataset.armed = "";
+      btn.textContent = T("gui.task.delete");
+      btn.classList.remove("btn-danger-armed");
+    }, 6000);
+    return;
+  }
+  runAction(async () => {
+    await api.post("/api/tasks/delete", { id });
+    notify(T("gui.toast.task_deleted", { id }));
+    closeTaskModal();
+    await loadAll();
+  });
+};
+// AI verdict on the open task: proposal only — the approve button below is the
+// HUMAN decision that actually marks the task done (the API refuses apply=true)
+$("#btn-task-verify").onclick = () => runAction(async () => {
+  const id = state.editingTaskId;
+  if (id == null) return;
+  const r = await api.post("/api/ai/task_verdict", { id });
+  const v = r.verdict;
+  state.taskVerdict = v;
+  const t = state.tasks.find((x) => x.id === id);
+  $("#task-verdict-result").textContent =
+    `${v.seems_complete ? T("verdict.complete") : T("verdict.incomplete")} (${Math.round(v.confidence * 100)}%) — ${v.reasoning}` +
+    (v.evidence && v.evidence.length ? "\n• " + v.evidence.join("\n• ") : "");
+  // the approve button is shown only for a positive verdict on an unfinished task
+  $("#btn-task-verify-approve").classList.toggle("hidden",
+    !(v.seems_complete && t && t.status !== "done" && t.status !== "cancelled"));
+});
+$("#btn-task-verify-approve").onclick = () => runAction(async () => {
+  const id = state.editingTaskId;
+  if (id == null) return;
+  // human click = approval: THIS is what marks the task done, not the AI
+  await api.post("/api/tasks/status", { id, status: "done" });
+  notify(T("gui.toast.task_done", { id }));
+  closeTaskModal();
+  await loadAll();
+});
 $("#btn-export").onclick = () => runAction(doExport);
 $("#btn-demo").onclick = () => runAction(doDemoSeed);
 $("#btn-upd-check").onclick = () => runAction(checkUpdate);
