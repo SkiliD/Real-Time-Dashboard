@@ -7,7 +7,11 @@
 const $ = (sel) => document.querySelector(sel);
 
 const api = {
-  get: (p) => fetch(p).then((r) => r.json()),
+  get: (p) => fetch(p).then(async (r) => {
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || r.statusText); // a 4xx/5xx must not kill the UI silently
+    return d;
+  }),
   post: (p, body) =>
     fetch(p, {
       method: "POST",
@@ -59,14 +63,11 @@ async function loadAll() {
   const p = await api.get("/api/projects");
   state.projects = p.projects;
   state.active = p.active;
-  await loadTasks();
-  await loadSession();
-  await loadSessions();
-  await loadLogs();
-  await loadGit();
-  await loadFeatures();
-  await loadAiStatus();
-  await loadStats();
+  // all panel loads are independent: run them concurrently instead of 9 sequential round-trips
+  await Promise.all([
+    loadTasks(), loadSession(), loadSessions(), loadLogs(), loadGit(),
+    loadFeatures(), loadAiStatus(), loadStats(),
+  ]);
   state.status = await api.get("/api/status");
   render();
 }
@@ -153,6 +154,12 @@ function render() {
   renderStats();
 }
 
+// project colors end up in a style attribute: only accept #rrggbb (the API
+// validates on write too — this is defense in depth against a hand-edited DB)
+function cssColor(c) {
+  return /^#[0-9a-fA-F]{6}$/.test(c || "") ? c : "#8a8f98";
+}
+
 function renderProjects() {
   const ul = $("#project-list");
   ul.innerHTML = "";
@@ -160,7 +167,7 @@ function renderProjects() {
     const li = document.createElement("li");
     if (p.slug === state.active) li.classList.add("active");
     li.innerHTML =
-      `<span class="dot" style="background:${p.color}"></span>` +
+      `<span class="dot" style="background:${cssColor(p.color)}"></span>` +
       `<span>${escapeHtml(p.name)}</span>` +
       `<span class="meta">${T("engine." + p.engine)}</span>`;
     li.title = p.slug + " — " + T("pstatus." + p.status);
@@ -185,7 +192,7 @@ function renderHeader() {
   const today = st.today_minutes != null ? ` · ⏱ ${Math.round(st.today_minutes)} ${T("gui.chart.minutes").toLowerCase().slice(0, 3)}.` : "";
   const streak = st.streak_days != null ? ` · 🔥 ${st.streak_days} ${T("gui.day_unit")}` : "";
   h.innerHTML =
-    `<span class="dot" style="background:${p.color}"></span>` +
+    `<span class="dot" style="background:${cssColor(p.color)}"></span>` +
     `<h1>${escapeHtml(p.name)}</h1>` +
     `<span class="sub">${T("gui.header.sub", { engine: T("engine." + p.engine), status: T("pstatus." + p.status), open })}${prog}${today}${streak}</span>`;
   const sel = $("#session-task");
@@ -467,6 +474,7 @@ function makeDoughnut(canvasId, labels, data) {
 function renderStats() {
   const s = state.stats;
   if (!s || !s.project) return;
+  if (state.tab !== "stats") return; // rebuilding 4 charts on every poll is wasteful when hidden
   chartDefaults();
   $("#stat-today").textContent = Math.round(s.minutes.today) + " min";
   $("#stat-week").textContent = Math.round(s.minutes.week) + " min";
@@ -524,6 +532,18 @@ async function chatWeek() {
   renderChat();
 }
 
+async function chatContext() {
+  // local-only preview: shows exactly what a provider would receive
+  try {
+    const r = await api.get("/api/ai/context");
+    state.chat.push({ role: "assistant",
+      content: `📋 ${T("ai.context.line", { chars: r.chars, max: r.max_chars, provider: r.provider || "-", cloud: r.cloud })}\n\n${r.context}` });
+  } catch (e) {
+    state.chat.push({ role: "assistant", content: "⚠ " + e.message });
+  }
+  renderChat();
+}
+
 async function chatPlan(apply) {
   const input = $("#plan-input");
   const title = input.value.trim();
@@ -538,7 +558,8 @@ async function chatPlan(apply) {
         : T("gui.plan.proposed", { lines })) ,
     });
     if (!r.applied) {
-      state.chat.push({ role: "assistant", content: `__PLAN__${title}` });
+      // remember the pending proposal for the confirm button, but never render
+      // an internal marker into the chat log
       state.pendingPlan = title;
     }
     if (r.applied) input.value = "";
@@ -613,6 +634,7 @@ function switchTab(tab) {
   $("#tab-features").classList.toggle("hidden", tab !== "features");
   $("#tab-ai").classList.toggle("hidden", tab !== "ai");
   $("#tab-stats").classList.toggle("hidden", tab !== "stats");
+  if (tab === "stats") renderStats(); // charts are only built while the tab is visible
 }
 
 /* ---------- wiring ---------- */
@@ -643,13 +665,14 @@ $("#feature-name").addEventListener("keydown", (e) => { if (e.key === "Enter") a
 $("#btn-chat-send").onclick = chatSend;
 $("#chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") chatSend(); });
 $("#btn-chat-week").onclick = chatWeek;
+$("#btn-chat-context").onclick = chatContext;
 $("#btn-plan").onclick = () => {
   if (state.pendingPlan) {
-    // explicit confirmation: second click = create the subtasks (apply)
-    const title = state.pendingPlan;
+    // explicit confirmation: second click = create the subtasks (apply).
+    // Set the input FIRST: chatPlan reads it synchronously.
+    $("#plan-input").value = state.pendingPlan;
     state.pendingPlan = null;
     chatPlan(true);
-    $("#plan-input").value = title;
   } else {
     chatPlan(false);
   }
@@ -658,10 +681,15 @@ $("#btn-plan").onclick = () => {
 /* ---------- live updates ---------- */
 
 async function pollEvents() {
+  if (document.hidden) return; // no point polling (and reloading charts) while the tab is hidden
   try {
     const d = await api.get("/api/events?since=" + state.lastEventId);
-    state.lastEventId = d.last_id;
-    if (d.events.length > 0) await loadAll();
+    if (d.events.length > 0) {
+      await loadAll(); // only advance the cursor once the reload SUCCEEDED,
+      state.lastEventId = d.last_id; // otherwise those events would be skipped forever
+    } else {
+      state.lastEventId = d.last_id;
+    }
     $("#conn-status").style.color = "var(--green)";
   } catch {
     $("#conn-status").style.color = "var(--red)";
@@ -674,7 +702,8 @@ api.get("/api/i18n")
   .then((d) => { I18N = d; applyI18n(); })
   .catch(() => {})
   .finally(() => loadAll().then(() => api.get("/api/status").then((s) => { state.lastEventId = s.last_event_id || 0; })));
-setInterval(pollEvents, 1500);
+const POLL_MS = 1500;
+setInterval(pollEvents, POLL_MS);
 
 /* ---------- utils ---------- */
 

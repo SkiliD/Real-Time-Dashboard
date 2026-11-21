@@ -50,7 +50,7 @@ class OllamaProvider(AIProvider):
             return data["message"]["content"]
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:300]
-            raise AIError(f"ollama: HTTP {e.code} — {detail}") from e
+            raise AIError(f"ollama: HTTP {e.code} — {detail}") from e  # local: no key to leak
         except Exception as e:
             raise AIError(
                 f"ollama: {type(e).__name__}: {e} (is `ollama serve` running and the model pulled?)"

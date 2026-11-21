@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .. import config as cfgmod
 from .. import features, gitwatch, projects, stats
+from .. import i18n
 from .. import tasks as tsk
 from . import context as ctx_mod
 from . import get_provider, ai_status
@@ -39,29 +40,70 @@ def _cfg_and_provider(home: Path | None):
     cfg = cfgmod.load_config(home)
     provider = get_provider(cfg)
     if provider is None:
-        raise AIDisabledError(
-            "IA désactivée. Activez-la dans ~/.devdash/config.json "
-            '(ai_enabled=true, ai_provider="ollama"|"mistral"|"openai"|"mock", ai_model=..., ai_api_key=... pour le cloud)'
-        )
+        raise AIDisabledError(i18n.tr("ai.disabled", home=home))
     return cfg, provider
 
 
-def _flag(cfg, name: str) -> None:
+def _flag(cfg, name: str, home: Path | None = None) -> None:
     if not cfg.ai_feature_flags.get(name, True):
-        raise AIDisabledError(f"fonction IA '{name}' désactivée dans config.json (ai_feature_flags)")
+        raise AIDisabledError(i18n.tr("ai.flag_disabled", home=home, name=name))
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str, home: Path | None = None) -> dict:
+    """Pull the first JSON object out of a model answer. Malformed model output
+    must surface as AIError (clean CLI/GUI error), never as a raw JSONDecodeError."""
     m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S) or re.search(r"\{.*\}", text, re.S)
     if not m:
-        raise AIError(f"réponse IA non JSON: {text[:200]}")
-    return json.loads(m.group(1) if m.groups() else m.group(0))
+        raise AIError(i18n.tr("ai.non_json", home=home, snippet=text[:200]))
+    try:
+        return json.loads(m.group(1) if m.groups() else m.group(0))
+    except json.JSONDecodeError as e:
+        raise AIError(i18n.tr("ai.non_json", home=home, snippet=f"{text[:200]} ({e})")) from e
+
+
+def _valid_subtask(sub) -> tuple[bool, str]:
+    """Validate one model-proposed subtask before it ever touches the DB."""
+    if not isinstance(sub, dict):
+        return False, "not an object"
+    if not isinstance(sub.get("title"), str) or not sub["title"].strip():
+        return False, "missing title"
+    tags = sub.get("tags")
+    if tags is not None and (not isinstance(tags, list) or not all(isinstance(t, str) for t in tags)):
+        return False, "tags must be a list of strings"
+    est = sub.get("estimate_min")
+    if est is not None and (isinstance(est, bool) or not isinstance(est, int) or est < 0):
+        return False, "estimate_min must be a positive int or null"
+    return True, ""
+
+
+def ctx_logs_search(conn, text: str, project_id: int):
+    """Search devlog entries mentioning `text` in a project (verdict context)."""
+    from .. import logs
+    return logs.search(conn, text, project_id=project_id, limit=5)
+
+
+def context_preview(conn: sqlite3.Connection, home: Path | None = None) -> dict:
+    """Show EXACTLY the compact context that would be sent to the model.
+
+    Purely local (no provider needed, works with AI disabled): lets the user
+    audit what a cloud provider would receive before enabling it.
+    """
+    cfg = cfgmod.load_config(home)
+    text = ctx_mod.build_context(conn)
+    return {
+        "context": text,
+        "chars": len(text),
+        "max_chars": ctx_mod.DEFAULT_MAX_CHARS,
+        "ai_enabled": cfg.ai_enabled,
+        "provider": cfg.ai_provider if cfg.ai_enabled else None,
+        "cloud": ai_status(cfg)["cloud"],
+    }
 
 
 def ask(conn: sqlite3.Connection, question: str, home: Path | None = None) -> dict:
     """Free chat with the project context ('où en suis-je ?', 'mes blocages ?')."""
     cfg, provider = _cfg_and_provider(home)
-    _flag(cfg, "chat")
+    _flag(cfg, "chat", home)
     sys_prompt = "Contexte projet (résumé compact, ne le cite pas tel quel):\n" + ctx_mod.build_context(conn)
     messages = [
         {"role": "system", "content": sys_prompt},
@@ -79,10 +121,10 @@ def ask(conn: sqlite3.Connection, question: str, home: Path | None = None) -> di
 def summarize_week(conn: sqlite3.Connection, home: Path | None = None) -> dict:
     """Week summary: done, blockers, suggestions."""
     cfg, provider = _cfg_and_provider(home)
-    _flag(cfg, "summarize")
+    _flag(cfg, "summarize", home)
     active = projects.get_active(conn)
     if active is None:
-        raise AIDisabledError("aucun projet actif")
+        raise AIDisabledError(i18n.tr("ai.no_active", home=home))
     time7 = stats.time_by_day(conn, active.id, days=7)
     done7 = stats.tasks_done_by_day(conn, active.id, days=7)
     from .. import logs, sessions
@@ -106,21 +148,34 @@ def plan(conn: sqlite3.Connection, title: str, apply: bool = False, home: Path |
     """Split a big task into subtasks. apply=False -> proposal only (NO write).
     apply=True -> creates the subtasks (explicit human consent: CLI --apply)."""
     cfg, provider = _cfg_and_provider(home)
-    _flag(cfg, "plan")
+    _flag(cfg, "plan", home)
     messages = [
         {"role": "system", "content": PLAN_SYSTEM},
         {"role": "user", "content": "Contexte:\n" + ctx_mod.build_context(conn) + f"\n\nTâche à découper, titre: {title}"},
     ]
     raw = provider.chat(messages, temperature=0.3)
-    proposal = _extract_json(raw).get("subtasks", [])
+    raw_subs = _extract_json(raw, home).get("subtasks", [])
+    if not isinstance(raw_subs, list):
+        raw_subs = []
+    proposal, rejected = [], []
+    for sub in raw_subs:
+        ok, reason = _valid_subtask(sub)
+        if ok:
+            proposal.append({
+                "title": sub["title"].strip(),
+                "estimate_min": sub.get("estimate_min"),
+                "tags": [t for t in (sub.get("tags") or []) if isinstance(t, str)],
+            })
+        else:
+            rejected.append(reason)
     result = {"title": title, "proposal": proposal, "applied": False, "created_task_ids": [],
-              "provider": provider.name, "cloud": ai_status(cfg)["cloud"]}
+              "rejected_subtasks": rejected, "provider": provider.name, "cloud": ai_status(cfg)["cloud"]}
     if apply and proposal:
         active = projects.get_active(conn)
         if active is None:
-            raise AIDisabledError("aucun projet actif pour --apply")
+            raise AIDisabledError(i18n.tr("ai.no_active_apply", home=home))
         for sub in proposal:
-            t = tsk.add(conn, active.id, sub.get("title", "sous-tâche"),
+            t = tsk.add(conn, active.id, sub["title"],
                         priority="medium", estimate_min=sub.get("estimate_min"),
                         tags=sub.get("tags") or [])
             result["created_task_ids"].append(t.id)
@@ -132,13 +187,13 @@ def feature_verdict(conn: sqlite3.Connection, ref, home: Path | None = None) -> 
     """Cross tasks + commits + devlog to emit a verdict PROPOSAL for a feature.
     NEVER marks done: calls features.propose() at most."""
     cfg, provider = _cfg_and_provider(home)
-    _flag(cfg, "feature_verdict")
+    _flag(cfg, "feature_verdict", home)
     active = projects.get_active(conn)
     if active is None:
-        raise AIDisabledError("aucun projet actif")
+        raise AIDisabledError(i18n.tr("ai.no_active", home=home))
     f = features.get(conn, ref, active.id)
     if f is None:
-        raise AIDisabledError(f"feature {ref!r} introuvable")
+        raise AIDisabledError(i18n.tr("ai.feature_not_found", home=home, ref=str(ref)))
     sig = features.check_completion(conn, f.id)
     repo = gitwatch.get_link(conn, active.id)
     linked = []
@@ -156,17 +211,13 @@ def feature_verdict(conn: sqlite3.Connection, ref, home: Path | None = None) -> 
         {"role": "user", "content": "Données feature:\n" + json.dumps(payload, ensure_ascii=False)},
     ]
     raw = provider.chat(messages, temperature=0.2)
-    verdict = _extract_json(raw)
+    verdict = _extract_json(raw, home)
     proposed = False
     if verdict.get("seems_complete") and f.status not in ("done", "rejected"):
+        conf = verdict.get("confidence")
         f = features.propose(conn, f.id, source="ai",
-                             confidence=verdict.get("confidence"),
-                             reasoning=verdict.get("reasoning"))
+                             confidence=conf if isinstance(conf, (int, float)) else None,
+                             reasoning=verdict.get("reasoning") if isinstance(verdict.get("reasoning"), str) else None)
         proposed = True
     return {"verdict": verdict, "feature": f.to_dict(), "proposed": proposed,
             "provider": provider.name, "cloud": ai_status(cfg)["cloud"]}
-
-
-def ctx_logs_search(conn, text: str, project_id: int):
-    from .. import logs
-    return logs.search(conn, text, project_id=project_id, limit=5)

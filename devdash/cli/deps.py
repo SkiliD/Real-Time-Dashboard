@@ -43,3 +43,16 @@ def resolve_project(conn: sqlite3.Connection, ref: str | None):
     if project is None:
         raise typer.BadParameter(tr("err.no_active_project"))
     return project
+
+
+def guard(fn, *args, **kwargs):
+    """THE single CLI error boundary: run a core call and turn domain errors
+    (KeyError = unknown id/ref, ValueError = invalid value) into a clean
+    `Invalid value: ...` message instead of a raw traceback. Every command
+    uses this — no per-command try/except anywhere else."""
+    try:
+        return fn(*args, **kwargs)
+    except KeyError as e:
+        raise typer.BadParameter(e.args[0] if e.args else "not found") from e
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e

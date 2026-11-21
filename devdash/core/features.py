@@ -37,7 +37,10 @@ def create(conn: sqlite3.Connection, project_id: int, name: str, description: st
 
 
 def get(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature | None:
-    """By id (int) or by name (scoped to project_id, else the active project)."""
+    """By id (int) or by name. Names are ALWAYS scoped to a project (the given
+    one, else the active one) — never resolved across projects, so a name can
+    never mutate another project's feature by accident. With no project at all,
+    a global name lookup is allowed only when exactly one feature matches."""
     if isinstance(ref, int) or (isinstance(ref, str) and ref.isdigit()):
         row = conn.execute("SELECT * FROM features WHERE id = ?", (int(ref),)).fetchone()
         return Feature.from_row(row) if row else None
@@ -49,14 +52,15 @@ def get(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None)
         row = conn.execute(
             "SELECT * FROM features WHERE name = ? AND project_id = ?", (ref, pid)
         ).fetchone()
-        if row:
-            return Feature.from_row(row)
-    row = conn.execute("SELECT * FROM features WHERE name = ?", (ref,)).fetchone()
-    return Feature.from_row(row) if row else None
+        return Feature.from_row(row) if row else None
+    rows = conn.execute("SELECT * FROM features WHERE name = ?", (ref,)).fetchall()
+    if len(rows) == 1:
+        return Feature.from_row(rows[0])
+    return None  # 0 matches, or ambiguous across projects -> caller raises KeyError
 
 
 def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | None = None) -> list[dict]:
-    """Features with their task progress embedded."""
+    """Features with task progress counts (single grouped query, no N+1)."""
     clauses, values = [], []
     if project_id is not None:
         clauses.append("project_id = ?")
@@ -68,10 +72,21 @@ def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | 
     rows = conn.execute(
         f"SELECT * FROM features {where} ORDER BY created_at DESC, id DESC", values
     ).fetchall()
+    counts = {
+        r["feature_id"]: (r["total"], r["done"])
+        for r in conn.execute(
+            "SELECT feature_id, COUNT(*) AS total, "
+            "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done "
+            "FROM tasks WHERE feature_id IS NOT NULL AND status != 'cancelled' "
+            "GROUP BY feature_id"
+        ).fetchall()
+    }
     out = []
     for r in rows:
         f = Feature.from_row(r)
-        out.append({**f.to_dict(), "progress": progress(conn, f.id)})
+        total, done = counts.get(f.id, (0, 0))
+        pct = round(100 * done / total, 1) if total else 0.0
+        out.append({**f.to_dict(), "progress": {"total": total, "done": done, "pct": pct}})
     return out
 
 
@@ -98,15 +113,17 @@ def detach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: i
     return f
 
 
-def progress(conn: sqlite3.Connection, feature_id: int) -> dict:
+def progress(conn: sqlite3.Connection, feature_id: int, include_tasks: bool = True) -> dict:
     rows = tsk.list(conn, feature_id=feature_id, include_cancelled=False)
     done = [t for t in rows if t.status == "done"]
-    return {
+    p = {
         "total": len(rows),
         "done": len(done),
         "pct": round(100 * len(done) / len(rows), 1) if rows else 0.0,
-        "tasks": [t.to_dict() for t in rows],
     }
+    if include_tasks:
+        p["tasks"] = [t.to_dict() for t in rows]
+    return p
 
 
 def check_completion(conn: sqlite3.Connection, feature_id: int) -> dict:

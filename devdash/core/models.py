@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def now_iso() -> str:
@@ -12,7 +12,35 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _parse_tags(raw: str) -> list[str]:
+# --- local-day helpers -------------------------------------------------------
+# Timestamps are stored in UTC, but "today"/streaks/day buckets are computed in
+# the user's LOCAL timezone (converted to UTC for comparison with stored values),
+# so a session at 20:00-24:00 local counts on the right day.
+
+def local_now() -> datetime:
+    """Current time in the machine's local timezone (tz-aware)."""
+    return datetime.now().astimezone()
+
+
+def day_start_utc(days_ago: int = 0) -> str:
+    """Start of the local day `days_ago` days ago, as a UTC ISO string."""
+    d = local_now() - timedelta(days=days_ago)
+    d = d.replace(hour=0, minute=0, second=0, microsecond=0)
+    return d.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def today_str_local() -> str:
+    """Today's date (local timezone) as YYYY-MM-DD."""
+    return local_now().date().isoformat()
+
+
+def to_local_date(iso_utc: str) -> str:
+    """Convert a stored UTC ISO timestamp to the local calendar date (YYYY-MM-DD)."""
+    return datetime.fromisoformat(iso_utc).astimezone().date().isoformat()
+
+
+def parse_tags(raw: str) -> list[str]:
+    """Parse a stored JSON tags column; corrupt JSON -> empty list (never crash)."""
     try:
         value = json.loads(raw or "[]")
         return [str(t) for t in value] if isinstance(value, list) else []
@@ -85,7 +113,7 @@ class Task:
     @classmethod
     def from_row(cls, row) -> "Task":
         d = dict(row)
-        d["tags"] = _parse_tags(d.get("tags", "[]"))
+        d["tags"] = parse_tags(d.get("tags", "[]"))
         return cls(**d)
 
     def to_dict(self) -> dict:
@@ -126,7 +154,7 @@ class LogEntry:
     @classmethod
     def from_row(cls, row) -> "LogEntry":
         d = dict(row)
-        d["tags"] = _parse_tags(d.get("tags", "[]"))
+        d["tags"] = parse_tags(d.get("tags", "[]"))
         return cls(**d)
 
     def to_dict(self) -> dict:

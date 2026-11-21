@@ -1,5 +1,7 @@
-"""Productivity statistics (core). Used by `devdash status` now and by the
-GUI charts in step (j). All times are UTC ISO strings.
+"""Productivity statistics (core). Used by `devdash status` and the GUI charts.
+
+Timestamps are stored in UTC; day buckets ("today", streaks, per-day charts)
+are computed in the machine's LOCAL timezone via models helpers.
 """
 
 from __future__ import annotations
@@ -9,23 +11,32 @@ from datetime import datetime, timedelta, timezone
 
 from . import sessions
 from . import tasks as tsk
+from .models import day_start_utc, local_now, parse_tags, to_local_date, today_str_local
 
 DEFAULT_WEIGHT_MIN = 60  # tasks without estimate weigh this much
 
 
-def _today_str() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+def today_str() -> str:
+    """Today's date in the LOCAL timezone (YYYY-MM-DD)."""
+    return today_str_local()
+
+
+_today_str = today_str  # backward-compatible alias
 
 
 def _cutoff(days: int) -> str:
-    now = datetime.now(timezone.utc)
-    return (now - timedelta(days=days - 1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ).isoformat(timespec="seconds")
+    """Start of the local day `days-1` days ago, as a UTC ISO string."""
+    return day_start_utc(days - 1)
+
+
+def _local_days(days: int) -> list[str]:
+    """The last `days` local dates (YYYY-MM-DD), oldest first."""
+    now = local_now()
+    return [(now - timedelta(days=i)).date().isoformat() for i in range(days - 1, -1, -1)]
 
 
 def time_by_day(conn: sqlite3.Connection, project_id: int | None = None, days: int = 14) -> list[dict]:
-    """Minutes worked per day (stopped sessions), oldest first, gaps filled with 0."""
+    """Minutes worked per LOCAL day (stopped sessions), oldest first, gaps filled with 0."""
     clauses = ["ended_at IS NOT NULL", "started_at >= ?"]
     values: list = [_cutoff(days)]
     if project_id is not None:
@@ -37,13 +48,11 @@ def time_by_day(conn: sqlite3.Connection, project_id: int | None = None, days: i
     ).fetchall()
     by_day: dict[str, float] = {}
     for r in rows:
-        day = r["started_at"][:10]
+        day = to_local_date(r["started_at"])
         by_day[day] = by_day.get(day, 0.0) + (r["duration_min"] or 0.0)
-    now = datetime.now(timezone.utc)
     return [
-        {"date": (now - timedelta(days=i)).date().isoformat(),
-         "minutes": round(by_day.get((now - timedelta(days=i)).date().isoformat(), 0.0), 2)}
-        for i in range(days - 1, -1, -1)
+        {"date": d, "minutes": round(by_day.get(d, 0.0), 2)}
+        for d in _local_days(days)
     ]
 
 
@@ -68,29 +77,18 @@ def tasks_done_by_day(conn: sqlite3.Connection, project_id: int | None = None, d
     ).fetchall()
     by_day: dict[str, int] = {}
     for r in rows:
-        day = r["completed_at"][:10]
+        day = to_local_date(r["completed_at"])
         by_day[day] = by_day.get(day, 0) + 1
-    now = datetime.now(timezone.utc)
     return [
-        {"date": (now - timedelta(days=i)).date().isoformat(),
-         "count": by_day.get((now - timedelta(days=i)).date().isoformat(), 0)}
-        for i in range(days - 1, -1, -1)
+        {"date": d, "count": by_day.get(d, 0)}
+        for d in _local_days(days)
     ]
 
 
 def streak_days(conn: sqlite3.Connection, project_id: int | None = None) -> int:
-    """Consecutive days (ending today or yesterday) with at least one stopped session."""
-    clauses = ["ended_at IS NOT NULL"]
-    values: list = []
-    if project_id is not None:
-        clauses.append("project_id = ?")
-        values.append(project_id)
-    rows = conn.execute(
-        f"SELECT DISTINCT substr(started_at, 1, 10) AS d FROM sessions WHERE {' AND '.join(clauses)}",
-        values,
-    ).fetchall()
-    days = {r["d"] for r in rows}
-    today = datetime.now(timezone.utc).date()
+    """Consecutive LOCAL days (ending today or yesterday) with at least one stopped session."""
+    days = sessions.active_days(conn, project_id)
+    today = local_now().date()
     cursor = today if today.isoformat() in days else today - timedelta(days=1)
     streak = 0
     while cursor.isoformat() in days:
@@ -106,7 +104,8 @@ def project_progress(conn: sqlite3.Connection, project_id: int) -> dict:
     done = [t for t in all_tasks if t.status == "done"]
 
     def weight(t) -> float:
-        return float(t.estimate_min or DEFAULT_WEIGHT_MIN)
+        # an explicit 0-minute estimate is a real 0, not "no estimate"
+        return float(t.estimate_min) if t.estimate_min is not None else float(DEFAULT_WEIGHT_MIN)
 
     w_total = sum(weight(t) for t in all_tasks)
     w_done = sum(weight(t) for t in done)
@@ -119,7 +118,7 @@ def project_progress(conn: sqlite3.Connection, project_id: int) -> dict:
 
 
 def period_minutes(conn: sqlite3.Connection, project_id: int | None = None, days: int = 7) -> float:
-    """Total minutes of stopped sessions over the last `days` days."""
+    """Total minutes of stopped sessions over the last `days` days (rolling window)."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
     clauses = ["ended_at IS NOT NULL", "started_at >= ?"]
     values: list = [cutoff]
@@ -135,8 +134,6 @@ def period_minutes(conn: sqlite3.Connection, project_id: int | None = None, days
 def by_tag(conn: sqlite3.Connection, project_id: int | None = None) -> list[dict]:
     """Per-tag stats: number of (non-cancelled) tasks and minutes worked on
     tagged tasks (via sessions attached to those tasks)."""
-    import json as _json
-
     clauses = ["status != 'cancelled'"]
     values: list = []
     if project_id is not None:
@@ -147,11 +144,8 @@ def by_tag(conn: sqlite3.Connection, project_id: int | None = None) -> list[dict
     ).fetchall()
     tasks_per_tag: dict[str, int] = {}
     for r in rows:
-        try:
-            for tag in _json.loads(r["tags"] or "[]"):
-                tasks_per_tag[tag] = tasks_per_tag.get(tag, 0) + 1
-        except _json.JSONDecodeError:
-            pass
+        for tag in parse_tags(r["tags"] or "[]"):  # corrupt JSON -> [] inside parse_tags
+            tasks_per_tag[tag] = tasks_per_tag.get(tag, 0) + 1
     # minutes per tag: sessions joined to their task's tags
     clauses2 = ["s.ended_at IS NOT NULL", "s.task_id IS NOT NULL"]
     values2: list = []
@@ -165,11 +159,8 @@ def by_tag(conn: sqlite3.Connection, project_id: int | None = None) -> list[dict
     ).fetchall()
     min_per_tag: dict[str, float] = {}
     for r in rows2:
-        try:
-            for tag in _json.loads(r["tags"] or "[]"):
-                min_per_tag[tag] = min_per_tag.get(tag, 0.0) + (r["dur"] or 0.0)
-        except _json.JSONDecodeError:
-            pass
+        for tag in parse_tags(r["tags"] or "[]"):
+            min_per_tag[tag] = min_per_tag.get(tag, 0.0) + (r["dur"] or 0.0)
     tags = set(tasks_per_tag) | set(min_per_tag)
     return [
         {"tag": t, "tasks": tasks_per_tag.get(t, 0),

@@ -24,11 +24,23 @@ def _slugify(name: str) -> str:
 
 
 def _unique_slug(conn: sqlite3.Connection, base: str) -> str:
+    """Return base, or base-2, base-3, ... until the slug is free."""
     slug, i = base, 2
     while conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone():
         slug = f"{base}-{i}"
         i += 1
     return slug
+
+
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _validate_color(color: str) -> str:
+    """Colors end up in a CSS `style` attribute in the GUI: only allow #rrggbb,
+    anything else would be an injection vector."""
+    if not _HEX_COLOR.match(color):
+        raise ValueError(f"invalid color {color!r}: expected #rrggbb")
+    return color.lower()
 
 
 def create(
@@ -41,13 +53,24 @@ def create(
 ) -> Project:
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
+    color = _validate_color(color)
     now = now_iso()
     slug = _unique_slug(conn, _slugify(name))
-    cur = conn.execute(
-        "INSERT INTO projects(slug, name, description, engine, color, status, "
-        "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
-        (slug, name, description, engine.lower(), color, status, now, now),
-    )
+    try:
+        cur = conn.execute(
+            "INSERT INTO projects(slug, name, description, engine, color, status, "
+            "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            (slug, name, description, engine.lower(), color, status, now, now),
+        )
+    except sqlite3.IntegrityError:
+        # concurrent create grabbed the same slug between check and insert
+        conn.rollback()
+        slug = _unique_slug(conn, _slugify(name))
+        cur = conn.execute(
+            "INSERT INTO projects(slug, name, description, engine, color, status, "
+            "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            (slug, name, description, engine.lower(), color, status, now, now),
+        )
     conn.commit()
     project = get(conn, cur.lastrowid)
     assert project is not None
@@ -119,6 +142,8 @@ def update(
         raise KeyError(f"no project matching {ref!r}")
     if status is not None and status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
+    if color is not None:
+        color = _validate_color(color)
     fields, values = [], []
     for column, value in (
         ("name", name),
@@ -131,8 +156,7 @@ def update(
         if value is not None:
             fields.append(f"{column} = ?")
             values.append(value)
-    if name is not None:  # keep slug stable; only rename the display name
-        pass
+    # note: renaming a project keeps its slug stable (slug is the stable id)
     if fields:
         fields.append("updated_at = ?")
         values.append(now_iso())

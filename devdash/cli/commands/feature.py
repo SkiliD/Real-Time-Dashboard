@@ -13,7 +13,7 @@ from rich.table import Table
 
 from devdash.core import features as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, resolve_project
+from ..deps import get_conn, guard, resolve_project
 from ..output import emit
 
 app = typer.Typer(help=tr("group.feature.help"))
@@ -146,10 +146,7 @@ def done_feature(
     """MANUAL validation: mark a feature as done. Human decision, recorded with a timestamp."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    try:
-        f = core.approve(conn, ref, pid, note=note)
-    except (KeyError, ValueError) as e:
-        raise typer.BadParameter(str(e))
+    f = guard(core.approve, conn, ref, pid, note=note)
     emit(ctx, f.to_dict(), lambda: console.print(
         tr("feature.validated", name=f.name, at=f.validated_at)
     ))
@@ -165,10 +162,7 @@ def approve_feature(
     """Approve a (e.g. AI) proposal: the feature becomes done."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    try:
-        f = core.approve(conn, ref, pid, note=note)
-    except (KeyError, ValueError) as e:
-        raise typer.BadParameter(str(e))
+    f = guard(core.approve, conn, ref, pid, note=note)
     emit(ctx, f.to_dict(), lambda: console.print(
         tr("feature.approved", name=f.name, at=f.validated_at)
     ))
@@ -184,10 +178,7 @@ def reject_feature(
     """Reject a proposal; feedback is stored so it is not proposed again in a loop."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    try:
-        f = core.reject(conn, ref, feedback=feedback, project_id=pid)
-    except KeyError as e:
-        raise typer.BadParameter(str(e))
+    f = guard(core.reject, conn, ref, feedback=feedback, project_id=pid)
     emit(ctx, f.to_dict(), lambda: console.print(
         tr("feature.rejected", name=f.name)
     ))
@@ -204,10 +195,7 @@ def propose_feature(
     """Record a proposal (used by the AI assistant in step i). NEVER marks done."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    try:
-        f = core.propose(conn, ref, pid, source="ai", confidence=confidence, reasoning=reasoning)
-    except (KeyError, ValueError) as e:
-        raise typer.BadParameter(str(e))
+    f = guard(core.propose, conn, ref, pid, source="ai", confidence=confidence, reasoning=reasoning)
     emit(ctx, f.to_dict(), lambda: console.print(
         tr("feature.proposed", name=f.name, conf=confidence)
     ))
@@ -222,8 +210,5 @@ def reopen_feature(
     """Reopen a feature (back to 'open')."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    try:
-        f = core.reopen(conn, ref, pid)
-    except KeyError as e:
-        raise typer.BadParameter(str(e))
+    f = guard(core.reopen, conn, ref, pid)
     emit(ctx, f.to_dict(), lambda: console.print(tr("feature.reopened", name=f.name)))

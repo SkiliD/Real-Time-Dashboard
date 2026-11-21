@@ -8,6 +8,7 @@ gui.api.Api. The same server is embedded in the native desktop window
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +18,12 @@ from devdash.core import i18n
 
 from .api import Api, ApiError
 
+logger = logging.getLogger("devdash.gui")
+
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Max accepted POST body size (JSON payloads are tiny; 1 MB is generous)
+MAX_BODY_BYTES = 1_000_000
 
 GET_ROUTES = {
     "/api/i18n": lambda api, q: {"lang": i18n.get_lang(), "messages": i18n.messages()},
@@ -33,6 +39,7 @@ GET_ROUTES = {
     "/api/features": lambda api, q: api.features_list(q),
     "/api/features/show": lambda api, q: api.features_show(q),
     "/api/ai/status": lambda api, q: api.ai_status(),
+    "/api/ai/context": lambda api, q: api.ai_context(),
     "/api/stats": lambda api, q: api.stats_overview(q),
 }
 
@@ -70,6 +77,32 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep the console clean
         pass
 
+    def _check_host(self) -> bool:
+        """Anti-CSRF / anti-DNS-rebinding: the GUI is a local app, so only
+        requests addressed to this exact local origin are accepted. A webpage
+        opened in the user's browser cannot reach mutating routes with a
+        forged Host (and a simple cross-site POST is rejected here)."""
+        host = (self.headers.get("Host") or "").strip()
+        port = self.server.server_address[1]
+        allowed = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
+        if host not in allowed:
+            self._send_json({"error": "forbidden host"}, 403)
+            return False
+        return True
+
+    def _check_origin(self) -> bool:
+        """Defense in depth on mutating requests: if the browser sends an
+        Origin header (cross-site request), it must be our own local origin."""
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True  # same-origin / non-browser clients send no Origin
+        port = self.server.server_address[1]
+        allowed = {f"http://127.0.0.1:{port}", f"http://localhost:{port}", f"http://[::1]:{port}"}
+        if origin not in allowed:
+            self._send_json({"error": "forbidden origin"}, 403)
+            return False
+        return True
+
     # --- helpers ---
     def _send_json(self, obj, code: int = 200) -> None:
         payload = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
@@ -77,6 +110,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -86,6 +120,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(payload)))
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -99,11 +134,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(fn(self.api, arg))
         except ApiError as e:
             self._send_json({"error": str(e)}, e.status)
-        except Exception as e:  # never leak a traceback to the client
-            self._send_json({"error": f"{type(e).__name__}: {e}"}, 500)
+        except Exception as e:
+            # log full details server-side; the client gets a generic message
+            # (a raw exception can leak absolute paths, SQL, etc.)
+            logger.exception("API error on %s", self.path)
+            self._send_json({"error": "internal server error"}, 500)
 
     # --- HTTP verbs ---
     def do_GET(self) -> None:
+        if not self._check_host():
+            return
         parsed = urlparse(self.path)
         if parsed.path in GET_ROUTES:
             query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
@@ -118,19 +158,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         rel = rel[len("/static"):] if rel.startswith("/static/") else rel
         target = (self.static_dir / rel.lstrip("/")).resolve()
-        if not str(target).startswith(str(self.static_dir.resolve())) or not target.is_file():
+        # is_relative_to (not startswith) so a sibling dir like "static-evil"
+        # can never match; resolve() already blocks ".." escapes
+        if not target.is_relative_to(self.static_dir.resolve()) or not target.is_file():
             self._send_json({"error": "not found"}, 404)
             return
         self._send_file(target)
 
     def do_POST(self) -> None:
+        if not self._check_host() or not self._check_origin():
+            return
         parsed = urlparse(self.path)
-        length = int(self.headers.get("Content-Length") or 0)
+        if parsed.path not in POST_ROUTES:
+            self._send_json({"error": f"unknown route {parsed.path}"}, 404)
+            return
+        # API routes only accept real JSON: a cross-site "simple request"
+        # (text/plain form post) must never reach a mutating route
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            self._send_json({"error": "Content-Type must be application/json"}, 415)
+            return
+        raw_len = self.headers.get("Content-Length")
+        if raw_len is None:
+            self._send_json({"error": "Content-Length required"}, 411)
+            return
+        try:
+            length = int(raw_len)
+        except ValueError:
+            self._send_json({"error": "invalid Content-Length"}, 400)
+            return
+        if length > MAX_BODY_BYTES:
+            self._send_json({"error": "body too large"}, 413)
+            return
         raw = self.rfile.read(length) if length else b"{}"
         try:
             body = json.loads(raw.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._send_json({"error": "invalid JSON body"}, 400)
+            return
+        if not isinstance(body, dict):
+            self._send_json({"error": "JSON body must be an object"}, 400)
             return
         self._handle(POST_ROUTES, body)
 

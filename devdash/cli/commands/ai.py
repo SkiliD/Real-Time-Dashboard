@@ -32,7 +32,24 @@ def _run(ctx, fn, *args, **kwargs):
     try:
         return fn(conn, *args, home=cfgmod.devdash_home(), **kwargs)
     except (AIDisabledError, AIError) as e:
-        raise typer.BadParameter(str(e))
+        # a clean runtime error, not a usage error: message + exit 1 (not BadParameter/exit 2)
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command("context", help=tr("ai.context.help"))
+def context_cmd(ctx: typer.Context) -> None:
+    """Show the compact project context that WOULD be sent to the AI.
+
+    Purely local: nothing is sent anywhere, even with the AI enabled."""
+    from devdash.core.ai import context as ctx_mod
+    conn = get_conn(ctx)
+    r = assistant.context_preview(conn, home=cfgmod.devdash_home())
+    emit(ctx, r, lambda: (
+        console.print(tr("ai.context.line", chars=r["chars"], max=r["max_chars"],
+                         provider=r["provider"] or "-", cloud=r["cloud"])),
+        console.print(r["context"]),
+    ))
 
 
 @app.command("ask", help=tr("ai.ask.help"))

@@ -6,6 +6,7 @@ HTTP server). All methods return plain dicts/lists (JSON-serializable).
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -30,16 +31,47 @@ class ApiError(Exception):
 class Api:
     def __init__(self, home: Path | None = None):
         self.home = home  # None -> resolved from DEVDASH_HOME at call time
+        self._db_ready = False
+        self._db_lock = threading.Lock()
 
     @contextmanager
     def _conn(self):
         home = self.home or config.devdash_home()
         conn = db.connect(config.db_path(home))
-        db.init_db(conn)
+        # init_db runs the full schema script + a write commit: do it ONCE per
+        # process, not on every request (the event poll hits this 1.5s apart)
+        if not self._db_ready:
+            with self._db_lock:
+                if not self._db_ready:
+                    db.init_db(conn)
+                    self._db_ready = True
         try:
             yield conn
         finally:
             conn.close()
+
+    # --- input helpers: bad client input is a 400, never a 500 -------------
+
+    @staticmethod
+    def _int(value, what: str, default=None):
+        if value is None or value == "":
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise ApiError(f"invalid {what}: {value!r} (expected an integer)")
+
+    def _list_pid(self, c, query: dict) -> int | None:
+        """Scope for list endpoints: explicit project=... wins; 'all'/'*' means
+        every project; otherwise the ACTIVE project (the GUI header shows the
+        active project, so lists must match it — not silently mix all projects)."""
+        ref = query.get("project")
+        if ref in (None, ""):
+            active = proj.get_active(c)
+            return active.id if active else None
+        if ref in ("all", "*"):
+            return None
+        return self._resolve_project(c, ref).id
 
     # --- projects ---------------------------------------------------------
 
@@ -110,8 +142,7 @@ class Api:
 
     def tasks(self, query: dict) -> dict:
         with self._conn() as c:
-            project = query.get("project")
-            pid = self._resolve_project(c, project).id if project else None
+            pid = self._list_pid(c, query)  # defaults to the ACTIVE project
             raw_status = query.get("status")
             statuses = [s for s in raw_status.split(",") if s] if raw_status else None
             result = tsk.list(
@@ -128,14 +159,17 @@ class Api:
             raise ApiError("title is required")
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
-            t = tsk.add(
-                c, p.id, title,
-                description=body.get("description", ""),
-                priority=body.get("priority", "medium"),
-                estimate_min=body.get("estimate_min"),
-                tags=body.get("tags", []),
-                parent_id=body.get("parent_id"),
-            )
+            try:
+                t = tsk.add(
+                    c, p.id, title,
+                    description=body.get("description", ""),
+                    priority=body.get("priority", "medium"),
+                    estimate_min=self._int(body.get("estimate_min"), "estimate_min"),
+                    tags=body.get("tags", []),
+                    parent_id=self._int(body.get("parent_id"), "parent_id"),
+                )
+            except (KeyError, ValueError) as e:
+                raise ApiError(str(e))
             return {**t.to_dict(), "project": p.slug}
 
     def tasks_set_status(self, body: dict) -> dict:
@@ -163,7 +197,7 @@ class Api:
             else:
                 active = proj.get_active(c)
                 pid = active.id if active else None
-            days = int(query.get("days", "14"))
+            days = self._int(query.get("days"), "days", 14)
             if pid is None:
                 return {"project": None, "time_by_day": [], "tasks_done_by_day": [],
                         "minutes": {"today": 0, "week": 0, "month": 0, "all": 0},
@@ -193,6 +227,12 @@ class Api:
     def ai_status(self) -> dict:
         from devdash.core.ai import ai_status as _ai_status
         return _ai_status(config.load_config(self.home))
+
+    def ai_context(self) -> dict:
+        """Preview of the compact context that would be sent to the model.
+        Purely local read — works with the AI disabled."""
+        with self._conn() as c:
+            return assistant.context_preview(c, home=self.home)
 
     def _ai_call(self, fn, *args, **kwargs):
         from devdash.core.ai.provider import AIDisabledError, AIError
@@ -228,8 +268,7 @@ class Api:
 
     def features_list(self, query: dict) -> dict:
         with self._conn() as c:
-            project = query.get("project")
-            pid = self._resolve_project(c, project).id if project else None
+            pid = self._list_pid(c, query)  # defaults to the ACTIVE project
             rows = feats.list(c, project_id=pid, status=query.get("status") or None)
             return {"count": len(rows), "features": rows}
 
@@ -252,7 +291,13 @@ class Api:
     def features_attach(self, body: dict) -> dict:
         with self._conn() as c:
             p, f = self._feature_ref(c, body)
-            f = feats.attach(c, f.id, int(body["task_id"]))
+            tid = self._int(body.get("task_id"), "task_id")
+            if tid is None:
+                raise ApiError("task_id is required")
+            try:
+                f = feats.attach(c, f.id, tid)
+            except KeyError as e:
+                raise ApiError(str(e), status=404)
             return {**f.to_dict(), "progress": feats.progress(c, f.id)}
 
     def features_done(self, body: dict) -> dict:
@@ -299,10 +344,13 @@ class Api:
     # --- git (step f, read-only) -------------------------------------------
 
     def git_link(self, body: dict) -> dict:
+        path = body.get("path")
+        if not path:
+            raise ApiError("path is required")
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
             try:
-                repo = gitwatch.link(c, p.id, body["path"])
+                repo = gitwatch.link(c, p.id, path)
             except (gitwatch.GitError, KeyError) as e:
                 raise ApiError(str(e))
             return {"project": p.slug, "repo_path": repo}
@@ -326,14 +374,13 @@ class Api:
 
     def git_commits(self, query: dict) -> dict:
         with self._conn() as c:
-            project = query.get("project")
-            pid = self._resolve_project(c, project).id if project else None
+            pid = self._list_pid(c, query)  # defaults to the ACTIVE project
             repo = gitwatch.get_link(c, pid) if pid else None
             rows = gitwatch.commits(
                 c, repo_path=repo, project_id=pid,
-                task_id=int(query["task"]) if query.get("task") else None,
+                task_id=self._int(query.get("task"), "task"),
                 unparsed=query.get("unparsed") in ("1", "true", "yes"),
-                limit=int(query.get("limit", "100")),
+                limit=self._int(query.get("limit"), "limit", 100),
             )
             return {"count": len(rows), "commits": [r.to_dict() for r in rows]}
 
@@ -348,13 +395,12 @@ class Api:
 
     def logs_list(self, query: dict) -> dict:
         with self._conn() as c:
-            project = query.get("project")
-            pid = self._resolve_project(c, project).id if project else None
+            pid = self._list_pid(c, query)  # defaults to the ACTIVE project
             rows = logs.list(
                 c, project_id=pid,
-                task_id=int(query["task"]) if query.get("task") else None,
+                task_id=self._int(query.get("task"), "task"),
                 query=query.get("q") or None,
-                limit=int(query.get("limit", "200")),
+                limit=self._int(query.get("limit"), "limit", 200),
             )
             return {"count": len(rows), "entries": [r.to_dict() for r in rows]}
 
@@ -364,8 +410,12 @@ class Api:
             raise ApiError("content is required")
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
-            e = logs.add(c, content, project_id=p.id,
-                         task_id=body.get("task_id"), tags=body.get("tags", []))
+            try:
+                e = logs.add(c, content, project_id=p.id,
+                             task_id=self._int(body.get("task_id"), "task_id"),
+                             tags=body.get("tags", []))
+            except KeyError as e2:
+                raise ApiError(str(e2))
             return {**e.to_dict(), "project": p.slug}
 
     # --- sessions (step d) -------------------------------------------------
@@ -373,20 +423,25 @@ class Api:
     def session_start(self, body: dict) -> dict:
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
-            s = sess.start(
-                c, p.id,
-                task_id=body.get("task_id"),
-                kind=body.get("kind", "focus"),
-                minutes=body.get("minutes"),
-            )
+            try:
+                s = sess.start(
+                    c, p.id,
+                    task_id=self._int(body.get("task_id"), "task_id"),
+                    kind=body.get("kind", "focus"),
+                    minutes=self._int(body.get("minutes"), "minutes"),
+                )
+            except (KeyError, ValueError) as e:
+                raise ApiError(str(e))
             return {**s.to_dict(), "project": p.slug}
 
     def session_stop(self, body: dict) -> dict:
         with self._conn() as c:
             try:
-                s = sess.stop(c, body.get("id"), note=body.get("note", ""))
+                s = sess.stop(c, self._int(body.get("id"), "id"), note=body.get("note", ""))
             except KeyError as e:
-                raise ApiError(str(e), status=404)
+                # "no running session" is a client error (400), not a missing row
+                msg = str(e)
+                raise ApiError(msg, status=400 if "running" in msg else 404)
             except ValueError as e:
                 raise ApiError(str(e))
             return s.to_dict()
@@ -401,14 +456,13 @@ class Api:
 
     def sessions_list(self, query: dict) -> dict:
         with self._conn() as c:
-            project = query.get("project")
-            pid = self._resolve_project(c, project).id if project else None
+            pid = self._list_pid(c, query)  # defaults to the ACTIVE project
             rows = sess.list(
                 c, project_id=pid,
-                task_id=int(query["task"]) if query.get("task") else None,
+                task_id=self._int(query.get("task"), "task"),
                 today=query.get("today") in ("1", "true", "yes"),
                 week=query.get("week") in ("1", "true", "yes"),
-                limit=int(query.get("limit", "50")),
+                limit=self._int(query.get("limit"), "limit", 50),
             )
             return {"count": len(rows), "sessions": [r.to_dict() for r in rows]}
 
@@ -438,7 +492,11 @@ class Api:
                 "last_event_id": ev.last_id(c),
             }
 
-    def events_since(self, since: int) -> dict:
+    def events_since(self, since) -> dict:
         with self._conn() as c:
-            got = ev.since(c, int(since))
-            return {"events": [e.to_dict() for e in got], "last_id": ev.last_id(c)}
+            since_id = self._int(since, "since", 0)
+            got = ev.since(c, since_id)
+            # last_id must be the last event actually RETURNED: with the LIMIT
+            # in ev.since, the global max would silently skip the missing ones
+            last = got[-1].id if got else since_id
+            return {"events": [e.to_dict() for e in got], "last_id": last}

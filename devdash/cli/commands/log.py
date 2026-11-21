@@ -8,7 +8,7 @@ from rich.table import Table
 
 from devdash.core import logs as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, resolve_project
+from ..deps import get_conn, guard, resolve_project
 from ..output import emit
 
 app = typer.Typer(help=tr("group.log.help"))
@@ -26,10 +26,7 @@ def add_log(
     """Add a devlog entry to the active project (or --project)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    try:
-        entry = core.add(conn, content, project_id=proj.id, task_id=task, tags=tag)
-    except ValueError as e:
-        raise typer.BadParameter(str(e))
+    entry = guard(core.add, conn, content, project_id=proj.id, task_id=task, tags=tag)
     data = {**entry.to_dict(), "project": proj.slug}
 
     def render() -> None:

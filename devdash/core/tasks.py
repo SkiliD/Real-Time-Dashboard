@@ -16,6 +16,13 @@ VALID_PRIORITIES = ("critical", "high", "medium", "low")
 VALID_STATUSES = ("todo", "in_progress", "done", "cancelled")
 
 
+class _Unset:
+    """Sentinel: distinguishes "argument not provided" from None (= set to NULL)."""
+
+
+_UNSET = _Unset()
+
+
 def add(
     conn: sqlite3.Connection,
     project_id: int,
@@ -47,7 +54,7 @@ def add(
             priority,
             estimate_min,
             status,
-            json.dumps([str(t) for t in tags]),  # NB: module-level list() shadows builtin
+            json.dumps([str(t) for t in tags]),
             feature_id,
             now,
             now,
@@ -91,9 +98,10 @@ def list(
         clauses.append("priority = ?")
         values.append(priority)
     if tag is not None:
-        # tags stored as JSON array; match with LIKE on the serialized form
-        clauses.append("tags LIKE ?")
-        values.append(f'%"{tag}"%')
+        # tags are stored as a JSON array; exact match via json_each (no LIKE
+        # wildcards, safe for tags containing % _ or quotes)
+        clauses.append("EXISTS (SELECT 1 FROM json_each(tasks.tags) WHERE json_each.value = ?)")
+        values.append(tag)
     if parent_id == "root":
         clauses.append("parent_id IS NULL")
     elif parent_id is not None:
@@ -154,45 +162,69 @@ def cancel(conn: sqlite3.Connection, task_id: int) -> Task:
     return set_status(conn, task_id, "cancelled")
 
 
+def _check_parent(conn: sqlite3.Connection, task: Task, parent_id: int | None) -> None:
+    """Validate a new parent: exists, same project, and no cycle (incl. self)."""
+    if parent_id is None:
+        return
+    if parent_id == task.id:
+        raise ValueError(f"task #{task.id} cannot be its own parent")
+    parent = get(conn, parent_id)
+    if parent is None:
+        raise KeyError(f"no parent task #{parent_id}")
+    if parent.project_id != task.project_id:
+        raise ValueError(f"parent task #{parent_id} belongs to another project")
+    # walk ancestors of the proposed parent; if we reach this task, it's a cycle
+    seen = {task.id}
+    cur = parent
+    while cur is not None and cur.parent_id is not None:
+        if cur.parent_id in seen:
+            raise ValueError(f"parenting task #{task.id} under #{parent_id} would create a cycle")
+        seen.add(cur.parent_id)
+        cur = get(conn, cur.parent_id)
+
+
 def update(
     conn: sqlite3.Connection,
     task_id: int,
     *,
-    title: str | None = None,
-    description: str | None = None,
-    priority: str | None = None,
-    estimate_min: int | None = None,
-    tags: list[str] | None = None,
-    parent_id: int | None = None,
-    feature_id: int | None = None,
+    title: str | None = _UNSET,
+    description: str | None = _UNSET,
+    priority: str | None = _UNSET,
+    estimate_min: int | None = _UNSET,
+    tags: list[str] | None = _UNSET,
+    parent_id: int | None = _UNSET,
+    feature_id: int | None = _UNSET,
 ) -> Task:
+    """Update fields. _UNSET (default) = leave unchanged; None = set to NULL."""
     task = get(conn, task_id)
     if task is None:
         raise KeyError(f"no task with id {task_id}")
-    if priority is not None and priority not in VALID_PRIORITIES:
+    if priority is not _UNSET and priority is not None and priority not in VALID_PRIORITIES:
         raise ValueError(f"invalid priority {priority!r}")
+    if parent_id is not _UNSET:
+        _check_parent(conn, task, parent_id)
     fields, values = [], []
     for column, value in (
         ("title", title),
         ("description", description),
         ("priority", priority),
         ("estimate_min", estimate_min),
-        ("tags", json.dumps([str(t) for t in tags]) if tags is not None else None),
+        ("tags", json.dumps([str(t) for t in tags]) if tags is not _UNSET else _UNSET),
         ("parent_id", parent_id),
         ("feature_id", feature_id),
     ):
-        if value is not None:
+        if value is not _UNSET:
             fields.append(f"{column} = ?")
-            values.append(value)
+            values.append(value)  # None is stored as NULL here
     if fields:
         fields.append("updated_at = ?")
         values.append(now_iso())
         values.append(task_id)
         conn.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", values)
         conn.commit()
-    task = get(conn, task_id)
-    assert task is not None
-    events.append(conn, "task", task.id, "updated", task.to_dict())
+        task = get(conn, task_id)
+        assert task is not None
+        events.append(conn, "task", task.id, "updated", task.to_dict())
     return task
 
 

@@ -10,7 +10,7 @@ from rich.table import Table
 
 from devdash.core import gitwatch
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, resolve_project
+from ..deps import get_conn, guard, resolve_project
 from ..output import emit
 
 app = typer.Typer(help=tr("group.git.help"))
@@ -28,7 +28,7 @@ def link_cmd(
     proj = resolve_project(conn, project)
     try:
         repo = gitwatch.link(conn, proj.id, path)
-    except (gitwatch.GitError, KeyError) as e:
+    except gitwatch.GitError as e:  # not a repo / path missing
         raise typer.BadParameter(str(e))
     emit(ctx, {"project": proj.slug, "repo_path": repo},
          lambda: console.print(tr("git.linked", slug=proj.slug, repo=repo)))

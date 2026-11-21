@@ -31,11 +31,20 @@ class Config:
     lang: str = "fr"
 
     # --- AI assistant (fully optional; app works 100% without it) ---
+    # ai_provider: "ollama" | "local" | "cli" | "anthropic" | "mistral" | "openai" | "openai_compat" | "mock"
+    #   ollama         local HTTP API of Ollama (default http://localhost:11434)
+    #   local          ANY local OpenAI-compatible server (LM Studio :1234, llama.cpp :8080, ...)
+    #   cli            ANY local AI run as a command line (prompt JSON on stdin, answer on stdout)
+    #   anthropic      Claude models via the Anthropic API (cloud, key required)
+    #   mistral/openai cloud OpenAI-compatible APIs (default base URLs, key required)
+    #   openai_compat  custom OpenAI-compatible endpoint (set ai_base_url + ai_api_key)
+    #   mock           deterministic, no network (tests/demos)
     ai_enabled: bool = False
-    ai_provider: str = "ollama"      # "ollama" | "openai_compat" (Mistral/OpenAI/...)
+    ai_provider: str = "ollama"
     ai_model: str = ""               # e.g. "mistral-small-latest" or "qwen3:8b"
     ai_api_key: str = ""             # never hardcoded, never logged
-    ai_base_url: str = ""            # e.g. "https://api.mistral.ai/v1" | "http://localhost:11434/v1"
+    ai_base_url: str = ""            # e.g. "https://api.mistral.ai/v1" | "http://localhost:11434" | "http://localhost:1234/v1"
+    ai_cli_command: str = ""         # for ai_provider="cli": e.g. "llama-cli -m model.gguf --no-display"
     ai_feature_flags: dict = field(default_factory=lambda: {
         "chat": True, "summarize": True, "plan": True, "feature_verdict": True,
     })
@@ -70,16 +79,51 @@ def config_path(home: Path | None = None) -> Path:
     return (home or devdash_home()) / "config.json"
 
 
+# Expected types per config key, used to validate config.json on load.
+# A value of the wrong type is ignored (default kept) instead of crashing.
+_KEY_TYPES: dict[str, tuple[type, ...]] = {
+    "lang": (str,),
+    "ai_enabled": (bool,),
+    "ai_provider": (str,),
+    "ai_model": (str,),
+    "ai_api_key": (str,),
+    "ai_base_url": (str,),
+    "ai_cli_command": (str,),
+    "ai_feature_flags": (dict,),
+    "commit_patterns": (list,),
+    "pomodoro_focus_min": (int,),
+    "pomodoro_break_min": (int,),
+    "git_watch_interval_sec": (int,),
+    "gui_port": (int,),
+}
+
+
 def load_config(home: Path | None = None) -> Config:
-    """Load config.json; unknown keys are ignored, missing file = defaults."""
+    """Load config.json. Missing file, malformed JSON or wrong-typed values all
+    fall back to defaults for the affected keys -- the app must never crash
+    because of a hand-edited config file."""
     path = config_path(home)
     cfg = Config()
     if not path.exists():
         return cfg
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return cfg  # malformed file: keep defaults rather than crash
+    if not isinstance(data, dict):
+        return cfg
     for key, value in data.items():
-        if hasattr(cfg, key):
-            setattr(cfg, key, value)
+        expected = _KEY_TYPES.get(key)
+        if expected is None or not hasattr(cfg, key):
+            continue  # unknown key: ignore
+        # bool is a subclass of int: reject bools where a real int is expected
+        if isinstance(value, bool) and bool not in expected:
+            continue
+        if not isinstance(value, expected):
+            continue
+        if key == "commit_patterns" and not all(isinstance(p, str) for p in value):
+            continue
+        setattr(cfg, key, value)
     return cfg
 
 

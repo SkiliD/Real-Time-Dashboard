@@ -18,7 +18,11 @@ def append(
     entity_id: int | str | None,
     action: str,
     payload: dict | None = None,
+    commit: bool = True,
 ) -> Event:
+    """Append an event. commit=False lets callers batch many events in one
+    transaction (the caller commits)."""
+    ts = now_iso()
     cur = conn.execute(
         "INSERT INTO events(entity, entity_id, action, payload, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -27,17 +31,18 @@ def append(
             str(entity_id) if entity_id is not None else None,
             action,
             json.dumps(payload or {}, ensure_ascii=False),
-            now_iso(),
+            ts,
         ),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return Event(
         id=cur.lastrowid,
         entity=entity,
         entity_id=str(entity_id) if entity_id is not None else None,
         action=action,
         payload=payload or {},
-        created_at=now_iso(),
+        created_at=ts,
     )
 
 

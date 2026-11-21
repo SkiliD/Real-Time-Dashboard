@@ -30,6 +30,10 @@ def add(
         project_id = active.id
     elif projects.get(conn, project_id) is None:
         raise KeyError(f"no project with id {project_id}")
+    if task_id is not None:
+        from . import tasks as _tasks
+        if _tasks.get(conn, task_id) is None:
+            raise KeyError(f"no task #{task_id}")
     now = now_iso()
     cur = conn.execute(
         "INSERT INTO log_entries(project_id, task_id, content, tags, created_at) "
@@ -64,8 +68,10 @@ def list(
         clauses.append("task_id = ?")
         values.append(task_id)
     if query:
-        clauses.append("content LIKE ?")
-        values.append(f"%{query}%")
+        # escape LIKE wildcards in user input, keep case-insensitive substring match
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("content LIKE ? ESCAPE '\\'")
+        values.append(f"%{escaped}%")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         f"SELECT * FROM log_entries {where} ORDER BY created_at DESC, id DESC LIMIT ?",

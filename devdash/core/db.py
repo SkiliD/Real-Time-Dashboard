@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -24,6 +24,12 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode = WAL")
     except sqlite3.DatabaseError:
         pass  # e.g. on filesystems without WAL support; plain journal is fine
+    try:
+        # the DB holds the whole dev history: restrict to the current user
+        # (best effort — chmod is a no-op-ish on Windows, ACLs would be stricter)
+        Path(db_path).chmod(0o600)
+    except OSError:
+        pass
     return conn
 
 
@@ -40,11 +46,19 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Additive migrations for databases created by older versions."""
+    """Additive migrations for databases created by older versions.
+
+    Version 0 = fresh database (schema.sql already applied by init_db), so
+    migrations only run when 0 < version < SCHEMA_VERSION.
+    """
+    version = schema_version(conn)
+    if version == 0:
+        conn.commit()
+        return
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
-    if "planned_min" not in cols:
+    if "planned_min" not in cols:  # v2
         conn.execute("ALTER TABLE sessions ADD COLUMN planned_min INTEGER")
-    if schema_version(conn) < 3:
+    if version < 3:
         # v3: git_commits.parsed_task_id no longer has a FK (a commit may
         # reference a task id that does not exist yet). Recreate the cache
         # table; it is rebuilt by the next `git sync`.
@@ -61,6 +75,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_commits_task ON git_commits(parsed_task_id)"
         )
+    if version < 4:
+        # v4: extra lookup indexes + cached git branch in git_sync_state
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS idx_tasks_feature ON tasks(feature_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_task ON sessions(task_id)",
+            "CREATE INDEX IF NOT EXISTS idx_log_task ON log_entries(task_id)",
+        ):
+            conn.execute(stmt)
+        sync_cols = {r["name"] for r in conn.execute("PRAGMA table_info(git_sync_state)").fetchall()}
+        if "branch" not in sync_cols:
+            conn.execute("ALTER TABLE git_sync_state ADD COLUMN branch TEXT")
     conn.commit()
 
 

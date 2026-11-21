@@ -101,14 +101,14 @@ la commande) pour une sortie machine.
 | Commande | Exemple | Description |
 |---|---|---|
 | `projects list` | `devdash projects list` | liste, `*` = actif |
-| `projects create` | `devdash projects create "Aether Vale" -e unity -s development --set-active` | `-e` moteur, `-s` statut, `-c` couleur |
+| `projects create` | `devdash projects create "Aether Vale" --engine unity --status development --color #7c5cff --set-active` | `--engine`, `--status`, `--color`, `--description`, `--set-active` |
 | `projects set-active <ref>` | `devdash projects set-active aether-vale` | **sans perte** : simple pointeur, les autres projets gardent tout |
 | `projects show/update/archive` | `devdash projects show aether-vale` | détail, édition, archivage (jamais de suppression dure) |
 | `task add` | `devdash task add "Dash" -p high -t gameplay -t combat --est 90` | `-p` projet (défaut: actif), `--parent` sous-tâche |
 | `task list` | `devdash task list -s todo -s in_progress --priority high --tag ui` | filtres statut/priorité/tag |
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | changement de statut |
 | `task edit <id>` | `devdash task edit 3 --priority critical --tag vfx` | édition |
-| `session start` | `devdash session start -t 3 --kind focus -m 25` | minuteur interactif ; `--background` pour revenir tout de suite |
+| `session start` | `devdash session start --task 3 --kind focus --minutes 25` | minuteur interactif ; `--background` pour rendre la main tout de suite, `--pomodoro` pour 25/5 |
 | `session stop` | `devdash session stop --note "fait: X, bloqué: Y"` | durée + note de fin |
 | `session now` / `session list` | `devdash session list --week` | session en cours / historique (`--today`, `--week`, `-t <id tâche>`) |
 | `log add` | `devdash log add "idée: dash aérien chaîné" --tag idea` | entrée de devlog |
@@ -121,6 +121,7 @@ la commande) pour une sortie machine.
 | `feature approve/reject` | `devdash feature reject dash --feedback "pas assez testé"` | approuver/rejeter une proposition (le rejet est mémorisé) |
 | `status` | `devdash status` ; `devdash status --watch` | instantané temps réel (tâches, session, streak, git) |
 | `stats today/week/month/streak/tags/all` | `devdash stats week` | temps, tâches faites, streak, répartition par tag |
+| `ai context` | `devdash ai context` | **affiche le contexte exact** qui serait envoyé à l'IA — rien n'est envoyé, même IA activée |
 | `ai ask` | `devdash ai ask "où en suis-je ?"` | chat (si IA activée) |
 | `ai summarize` | `devdash ai summarize --period week` | résumé de la semaine |
 | `ai plan` | `devdash ai plan "système de combat" --apply` | découpe en sous-tâches (`--apply` = seule écriture possible) |
@@ -143,8 +144,9 @@ Les commits non reconnus restent listés à part (`git log --unparsed`).
 
 ### Synchronisation auto des commits (optionnel, avec Vibe)
 
-Pour que `devdash git sync` se lance automatiquement après vos commits, ajoutez
-un hook dans `~/.vibe/hooks.toml` :
+Pour que `devdash git sync` se lance automatiquement après vos commits :
+
+**Avec Vibe** — hook dans `~/.vibe/hooks.toml` :
 
 ```toml
 [[hooks]]
@@ -153,6 +155,26 @@ on = "post_tool"
 tools = ["re:bash", "re:process_start"]
 command = "devdash git sync"
 ```
+
+**Avec Claude Code** — hook `PostToolUse` dans `~/.claude/settings.json` :
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "devdash git sync" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Ainsi, un commit fait depuis n'importe quel agent (Vibe, Claude Code, ou vous)
+apparaît dans la GUI DevDash sans redémarrage.
 
 ## 5. Données, portabilité, sauvegarde
 
@@ -183,8 +205,24 @@ Toutes les données tiennent dans **un seul dossier** :
 | `tasks` | projet, parent (sous-tâches), titre, priorité, estimation, statut, tags (JSON), feature liée |
 | `sessions` | projet, tâche, kind (focus/pause/custom), début/fin, durée, note |
 | `log_entries` | devlog daté, lié à un projet/tâche, tags |
-| `git_links` / `git_commits` / `git_sync_state` | dépôts liés, commits importés (lecture seule), tâche/feature parsée |
-| `events` | **bus d'événements append-only** : toute mutation y écrit une ligne ; la GUI pollue `events?since=` pour le temps réel |
+| `git_links` / `git_commits` / `git_sync_state` | dépôts liés, commits importés (lecture seule), tâche/feature parsée, branche |
+| `events` | **bus d'événements append-only** : toute mutation y écrit une ligne ; la GUI interroge `events?since=` pour le temps réel |
+
+### Sécurité (en bref)
+
+- Serveur GUI **uniquement sur `127.0.0.1`**, avec vérification `Host` **et**
+  `Origin` (anti-CSRF / anti-DNS-rebinding), `Content-Type: application/json`
+  exigé sur les POST, plafond de body 1 Mo, `X-Content-Type-Options: nosniff`,
+  erreurs 500 génériques (les détails sont logués côté serveur uniquement).
+- Chemins statiques servis via `is_relative_to` (pas de traversée de dossier).
+- `devdash.db` et `config.json` en `chmod 600` (best effort sous Windows).
+- Git **strictement lecture seule** (`git log` / `git rev-parse`, subprocess en
+  liste, jamais de shell). Les regex de `commit_patterns` sont appliquées sur un
+  sujet tronqué (anti-ReDoS).
+- Aucune clé API dans la DB, les événements, les logs ou les erreurs affichées.
+- Risque résiduel assumé : `git link` peut lire l'historique de n'importe quel
+  dépôt local (c'est son rôle) — la GUI est protégée contre les appels
+  cross-site, mais ne lie que des dépôts de confiance.
 
 ## 6. Assistant IA (optionnel)
 
@@ -202,6 +240,7 @@ GUI. Chaque fonction est activable individuellement via `ai_feature_flags`.
   "ai_model": "qwen3:8b",
   "ai_base_url": "",
   "ai_api_key": "",
+  "ai_cli_command": "",
   "ai_feature_flags": { "chat": true, "summarize": true, "plan": true, "feature_verdict": true },
   "commit_patterns": ["#(\\d+)", "task[-_ ]?(\\d+)", "feat(?:ure)?\\(([^)]+)\\)"],
   "pomodoro_focus_min": 25,
@@ -211,17 +250,31 @@ GUI. Chaque fonction est activable individuellement via `ai_feature_flags`.
 }
 ```
 
-- **Provider local privé** (recommandé) : `ai_provider: "ollama"` +
-  `ollama serve` en local. Aucune donnée ne sort de la machine.
-- **Provider cloud** : `ai_provider: "mistral"` (ou `"openai"` /
-  `"openai_compat"` avec `ai_base_url` personnalisé), `ai_api_key` renseignée.
-  Un **avertissement visuel** est affiché dans la GUI et le CLI tant qu'un
-  provider cloud est actif (les données partent vers un service externe).
-- `ai_provider: "mock"` : provider déterministe sans réseau (tests/démo).
-- **Protection des clés** : `config.json` vit dans `~/.devdash/` (hors dépôt). Si
+### Providers disponibles (`ai_provider`)
+
+| Provider | Cible | Cloud ? | Config requise |
+|---|---|---|---|
+| `ollama` | Ollama en local (`http://localhost:11434` par défaut, surcharge via `ai_base_url`) | non | `ai_model` ex. `"qwen3:8b"` |
+| `local` | **Tout serveur local compatible OpenAI** : LM Studio (`:1234` par défaut), llama.cpp server (`:8080`), vLLM, text-generation-webui… | non | `ai_model` (+ `ai_base_url` si port exotique) — aucune clé requise |
+| `cli` | **Toute IA locale en ligne de commande** (llama-cli, mistral.rs, `ollama run`…) : le prompt JSON part en stdin, la réponse revient en stdout, **sans shell** | non | `ai_cli_command` ex. `"llama-cli -m model.gguf"` |
+| `anthropic` | **Claude** (API Anthropic, `https://api.anthropic.com` par défaut) | **oui** | `ai_api_key` (`sk-ant-…`) + `ai_model` ex. `"claude-sonnet-4-5"` |
+| `mistral` / `openai` | Cloud (URLs par défaut) | **oui** | `ai_api_key` + `ai_model` |
+| `openai_compat` | Tout endpoint cloud compatible OpenAI | oui, sauf si `ai_base_url` est en loopback | `ai_base_url` + `ai_api_key` + `ai_model` |
+| `mock` | Provider déterministe sans réseau (tests/démo) | non | rien |
+
+- Un provider cloud = un **avertissement visuel** permanent dans la GUI
+  (bandeau) et un avertissement imprimé en CLI : le contexte du projet part
+  vers un service externe. La détection se base sur l'URL (loopback = local).
+- **Aperçu du contexte** : `devdash ai context` (CLI) ou le bouton
+  « Voir le contexte envoyé à l'IA » (GUI) montre **exactement** le résumé
+  compact envoyé au modèle (`core/ai/context.py`, tronqué à 6000 caractères) —
+  **sans rien envoyer**, même avec l'IA activée.
+- **Protection des clés** : `config.json` vit dans `~/.devdash/` (hors dépôt),
+  est écrit en `chmod 600`, la clé n'apparaît **jamais** dans la base, dans les
+  événements, dans les logs ni dans les messages d'erreur (masquée `***`). Si
   vous pointez `DEVDASH_HOME` dans le dépôt, le `.gitignore` exclut
-  `.devdash/`, `config.json`, `*.db` — aucune clé API ne peut être commitée
-  par accident. Aucun secret n'est suivi par le dépôt (`git ls-files` est clean).
+  `.devdash/`, `config.json`, `*.db`, `*.gguf`, `*secret*` — aucune clé API ne
+  peut être commitée par accident (`git ls-files` reste clean).
 
 ### Langue / Language
 
@@ -255,15 +308,16 @@ est enregistré comme feedback).
 devdash/
 ├── core/                 # logique métier, stdlib uniquement, testable seule
 │   ├── db.py             #   connexion SQLite, WAL, migrations de schéma
-│   ├── schema.sql        #   schéma (v3) documenté
+│   ├── schema.sql        #   schéma (v4) documenté
 │   ├── models.py         #   dataclasses Project/Task/Feature/Session/...
 │   ├── config.py         #   DEVDASH_HOME + config.json (séparé des données)
 │   ├── events.py         #   bus d'événements append-only (temps réel)
 │   ├── projects.py / tasks.py / sessions.py / logs.py / features.py
 │   ├── gitwatch.py       #   Git lecture seule + parsing des messages
 │   ├── stats.py / status.py / demo.py
-│   └── ai/               #   provider abstrait + ollama / openai_compat / mock
-│                         #   + context compact + assistant (ask/summarize/plan/verdict)
+│   └── ai/               #   provider abstrait + ollama / local / cli / anthropic /
+│                         #   mistral / openai / openai_compat / mock + context compact
+│                         #   + assistant (context/ask/summarize/plan/verdict)
 ├── cli/                  # typer + rich ; ne fait que formater et forwarder au core
 │   ├── main.py           #   point d'entrée, option globale --json
 │   └── commands/         #   projects/task/session/log/git/feature/ai/stats/demo/gui/status
@@ -273,7 +327,7 @@ devdash/
 │   ├── desktop.py        #   run(): fenêtre native, ou --browser
 │   └── static/           #   index.html / app.js / styles.css (thème sombre)
 │                         #   + vendor/chart.umd.min.js (Chart.js embarqué, hors-ligne)
-└── tests/                # pytest (63 tests)
+└── tests/                # pytest (98 tests)
 ```
 
 **Pourquoi Python** : stdlib riche (sqlite3, http.server, json, dataclasses),
@@ -292,7 +346,8 @@ WebView2 système (~30-60 Mo), bien moins qu'une app Electron.
 
 ```bash
 pip install -e ".[test]"
-pytest -q          # 63 tests : core, CLI, sessions, logs, git, GUI, features, IA, stats, status, demo
+PYTHONPATH=. python -m pytest -q   # 98 tests : core, CLI, sessions, logs, git, GUI,
+                                   # features, IA, stats, status, review, sécurité
 ```
 
 ## 9. Limites volontaires

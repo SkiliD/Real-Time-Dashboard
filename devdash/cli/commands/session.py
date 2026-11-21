@@ -15,7 +15,7 @@ from rich.console import Console
 from devdash.core import config as cfgmod
 from devdash.core import sessions as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, resolve_project
+from ..deps import get_conn, guard, resolve_project
 from ..output import emit
 
 app = typer.Typer(help=tr("group.session.help"))
@@ -93,12 +93,7 @@ def stop_cmd(
 ) -> None:
     """Stop a session and record its duration + note."""
     conn = get_conn(ctx)
-    try:
-        session = core.stop(conn, id, note=note)
-    except KeyError as e:
-        raise typer.BadParameter(str(e))
-    except ValueError as e:
-        raise typer.BadParameter(str(e))
+    session = guard(core.stop, conn, id, note=note)  # unknown id / no running session / already stopped
     emit(ctx, session.to_dict(), lambda: console.print(
         tr("session.stopped", id=session.id, dur=session.duration_min,
            note_suffix=tr("session.note_suffix", note=note) if note else "")

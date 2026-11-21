@@ -198,6 +198,8 @@ FR: dict[str, str] = {
     # --- CLI: ai ---
     "ai.cloud_warning": "[yellow]⚠ provider cloud ({provider}) — le contexte du projet part vers un service externe. Alternative privée: Ollama local.[/]",
     "ai.ask.help": "Interroge l'assistant IA (qui connaît le contexte compact du projet).",
+    "ai.context.help": "Affiche le contexte compact exact qui serait envoyé à l'IA (rien n'est envoyé, même avec l'IA activée).",
+    "ai.context.line": "Contexte envoyé à l'IA ({chars} caractères, max {max}) — provider: {provider}, cloud: {cloud}",
     "opt.question": "Question, ex. : \"où en suis-je ?\"",
     "ai.summarize.help": "Résumé IA de la semaine : accompli, blocages, suggestions.",
     "opt.period": "week (seul supporté pour l'instant)",
@@ -290,6 +292,7 @@ FR: dict[str, str] = {
     "gui.plan_btn": "Proposer un plan",
     "gui.chat_ph": "Poser une question à l’assistant… (Entrée)",
     "gui.chat_send": "Envoyer", "gui.chat_week": "Résumer ma semaine",
+    "gui.chat_context": "Voir le contexte envoyé à l’IA",
     "gui.stat.today": "Aujourd’hui", "gui.stat.week": "7 jours", "gui.stat.month": "30 jours",
     "gui.stat.streak": "Série 🔥", "gui.stat.progress": "Progression",
     "gui.chart.time": "Temps par jour (14 j)", "gui.chart.done": "Tâches faites par jour (7 j)",
@@ -330,6 +333,14 @@ FR: dict[str, str] = {
     "gui.chart.minutes": "Minutes", "gui.chart.tasks": "Tâches",
     "gui.chart.done_label": "Fait", "gui.chart.rest": "Reste",
     "gui.day_unit": "j",
+    # --- AI core errors (raised by core/ai/assistant.py) ---
+    "ai.disabled": "IA désactivée. Activez-la dans ~/.devdash/config.json (ai_enabled=true, ai_provider=\"ollama\"|\"local\"|\"cli\"|\"anthropic\"|\"mistral\"|\"openai\"|\"openai_compat\"|\"mock\", ai_model=..., ai_api_key=... pour le cloud).",
+    "ai.flag_disabled": "Fonction IA « {name} » désactivée dans config.json (ai_feature_flags).",
+    "ai.no_active": "Aucun projet actif.",
+    "ai.no_active_apply": "Aucun projet actif pour --apply.",
+    "ai.feature_not_found": "Feature « {ref} » introuvable dans le projet actif.",
+    "ai.non_json": "Réponse IA non JSON : {snippet}",
+    "ai.bad_plan_item": "Sous-tâche invalide ignorée : {reason}",
 }
 
 EN: dict[str, str] = {
@@ -499,6 +510,8 @@ EN: dict[str, str] = {
     "feature.reopened": "[green]↺[/] feature [bold]{name}[/] reopened",
     "ai.cloud_warning": "[yellow]⚠ cloud provider ({provider}) — project context is sent to an external service. Private alternative: local Ollama.[/]",
     "ai.ask.help": "Ask the AI assistant (knows the compact project context).",
+    "ai.context.help": "Show the exact compact context that would be sent to the AI (nothing is sent, even with AI enabled).",
+    "ai.context.line": "Context sent to the AI ({chars} chars, max {max}) — provider: {provider}, cloud: {cloud}",
     "opt.question": "Question, e.g.: \"where do I stand?\"",
     "ai.summarize.help": "AI summary of the week: done, blockers, suggestions.",
     "opt.period": "week (only one supported yet)",
@@ -587,6 +600,7 @@ EN: dict[str, str] = {
     "gui.plan_btn": "Suggest a plan",
     "gui.chat_ph": "Ask the assistant… (Enter)",
     "gui.chat_send": "Send", "gui.chat_week": "Summarize my week",
+    "gui.chat_context": "Show the context sent to the AI",
     "gui.stat.today": "Today", "gui.stat.week": "7 days", "gui.stat.month": "30 days",
     "gui.stat.streak": "Streak 🔥", "gui.stat.progress": "Progress",
     "gui.chart.time": "Time per day (14 d)", "gui.chart.done": "Tasks done per day (7 d)",
@@ -626,6 +640,14 @@ EN: dict[str, str] = {
     "gui.chart.minutes": "Minutes", "gui.chart.tasks": "Tasks",
     "gui.chart.done_label": "Done", "gui.chart.rest": "Left",
     "gui.day_unit": "d",
+    # --- AI core errors (raised by core/ai/assistant.py) ---
+    "ai.disabled": "AI disabled. Enable it in ~/.devdash/config.json (ai_enabled=true, ai_provider=\"ollama\"|\"local\"|\"cli\"|\"anthropic\"|\"mistral\"|\"openai\"|\"openai_compat\"|\"mock\", ai_model=..., ai_api_key=... for cloud).",
+    "ai.flag_disabled": "AI feature '{name}' disabled in config.json (ai_feature_flags).",
+    "ai.no_active": "No active project.",
+    "ai.no_active_apply": "No active project for --apply.",
+    "ai.feature_not_found": "Feature '{ref}' not found in the active project.",
+    "ai.non_json": "Non-JSON AI response: {snippet}",
+    "ai.bad_plan_item": "Invalid subtask skipped: {reason}",
 }
 
 MESSAGES: dict[str, dict[str, str]] = {"fr": FR, "en": EN}

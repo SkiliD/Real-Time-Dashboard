@@ -9,7 +9,7 @@ from rich.table import Table
 from devdash.core import projects as core
 from devdash.core import tasks as core_tasks
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn
+from ..deps import get_conn, guard
 from ..output import emit
 
 app = typer.Typer(help=tr("group.projects.help"))
@@ -86,10 +86,7 @@ def set_active(
 ) -> None:
     """Switch the active project (lossless: other projects keep all their data)."""
     conn = get_conn(ctx)
-    try:
-        project = core.set_active(conn, ref)
-    except KeyError:
-        raise typer.BadParameter(tr("err.no_project", ref=ref))
+    project = guard(core.set_active, conn, ref)
     emit(ctx, {"active": project.to_dict()}, lambda: console.print(
         tr("projects.active_now", slug=project.slug, name=project.name)
     ))

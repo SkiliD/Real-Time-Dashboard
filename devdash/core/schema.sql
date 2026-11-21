@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_feature ON tasks(feature_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent  ON tasks(parent_id);
 
 CREATE TABLE IF NOT EXISTS sessions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_task    ON sessions(task_id);
 
 CREATE TABLE IF NOT EXISTS log_entries (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,6 +78,7 @@ CREATE TABLE IF NOT EXISTS log_entries (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_log_project ON log_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_log_task    ON log_entries(task_id);
 
 CREATE TABLE IF NOT EXISTS git_links (
     project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -99,7 +103,8 @@ CREATE INDEX IF NOT EXISTS idx_commits_task  ON git_commits(parsed_task_id);
 CREATE TABLE IF NOT EXISTS git_sync_state (
     repo_path      TEXT PRIMARY KEY,
     last_sync_at   TEXT,
-    last_seen_hash TEXT
+    last_seen_hash TEXT,
+    branch         TEXT   -- cached by the last sync; lets git status be pure-DB (v4)
 );
 
 -- Append-only event bus: every core mutation appends a row. The GUI polls

@@ -14,10 +14,21 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from . import config, events, projects
-from .models import GitCommit, now_iso
+from .models import GitCommit, day_start_utc, now_iso
 
 MAX_COMMITS_PER_SYNC = 1000
+
+
+def _to_utc(iso_with_offset: str) -> str:
+    """Normalize an ISO-8601 timestamp (e.g. git %cI with +02:00) to UTC +00:00,
+    so lexical string comparison/sorting in SQL is chronologically correct."""
+    try:
+        return datetime.fromisoformat(iso_with_offset).astimezone(timezone.utc).isoformat(timespec="seconds")
+    except ValueError:
+        return iso_with_offset
 
 
 class GitError(Exception):
@@ -45,6 +56,15 @@ def is_repo(path) -> bool:
         return _git(path, "rev-parse", "--is-inside-work-tree").strip() == "true"
     except GitError:
         return False
+
+
+def head_hash(repo_path) -> str | None:
+    """Current HEAD commit hash, or None if unavailable. Used by the watcher to
+    skip the (expensive) full `git log` when nothing changed."""
+    try:
+        return _git(repo_path, "rev-parse", "HEAD").strip() or None
+    except GitError:
+        return None
 
 
 # --- links (project <-> local repo) ----------------------------------------
@@ -85,14 +105,24 @@ def linked_repos(conn: sqlite3.Connection) -> list[tuple[int, str]]:
 
 # --- commit parsing ----------------------------------------------------------
 
+# Commit subjects are matched against USER-CONFIGURED regexes (config.json):
+# cap the matched text so a pathological pattern cannot cause ReDoS on a huge
+# commit message (a subject is one line; 500 chars is already generous).
+MAX_PARSE_INPUT_CHARS = 500
+
+
 def parse_message(message: str, patterns: list[str]) -> tuple[int | None, str | None]:
     """Return (task_id, feature) parsed from a commit message, or (None, None).
 
     First matching pattern wins. A numeric capture group -> task id; otherwise
     the capture is treated as a feature name.
     """
+    haystack = message[:MAX_PARSE_INPUT_CHARS]
     for pattern in patterns:
-        m = re.search(pattern, message, re.IGNORECASE)
+        try:
+            m = re.search(pattern, haystack, re.IGNORECASE)
+        except re.error as e:
+            raise GitError(f"invalid commit pattern {pattern!r}: {e}") from e
         if m and m.groups():
             value = m.group(1)
             if value.isdigit():
@@ -113,12 +143,25 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
         raise GitError(f"path does not exist: {p}")
     _git(p, "rev-parse", "--git-dir")  # raises GitError if not a repo
     branch = _git(p, "rev-parse", "--abbrev-ref", "HEAD").strip() or "HEAD"
+
+    # cheap check: if HEAD did not move since the last sync, skip the full `git log`
+    state = conn.execute(
+        "SELECT last_seen_hash FROM git_sync_state WHERE repo_path = ?", (str(p),)
+    ).fetchone()
+    head = head_hash(p)
+    if state and head and state["last_seen_hash"] == head:
+        cached = conn.execute(
+            "SELECT COUNT(*) AS c FROM git_commits WHERE repo_path = ?", (str(p),)
+        ).fetchone()["c"]
+        return {"repo_path": str(p), "branch": state_branch(conn, str(p)) or branch,
+                "new": 0, "total": cached, "skipped": True}
+
     raw = _git(
         p, "log", "--format=%H%x1f%h%x1f%an%x1f%s%x1f%cI%x1e", "-n", str(MAX_COMMITS_PER_SYNC)
     )
     new = 0
     total = 0
-    last_short = None
+    pending_events = []
     for record in raw.split("\x1e"):
         record = record.strip("\r\n")
         if not record.strip():
@@ -127,8 +170,8 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
         if len(parts) != 5:
             continue
         commit_hash, short, author, subject, committed_at = parts
+        committed_at = _to_utc(committed_at)  # normalize offset -> UTC for correct sorting
         total += 1
-        last_short = short
         task_id, feature = parse_message(subject, patterns)
         cur = conn.execute(
             "INSERT OR IGNORE INTO git_commits(hash, repo_path, short, author, message, "
@@ -139,19 +182,33 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
         )
         if cur.rowcount:  # new commit
             new += 1
-            events.append(conn, "git", commit_hash, "commit", {
+            pending_events.append({
                 "hash": commit_hash, "short": short, "message": subject,
                 "author": author, "branch": branch, "committed_at": committed_at,
                 "task_id": task_id, "feature": feature, "repo_path": str(p),
             })
     conn.execute(
-        "INSERT INTO git_sync_state(repo_path, last_sync_at, last_seen_hash) "
-        "VALUES (?, ?, ?) ON CONFLICT(repo_path) DO UPDATE SET "
-        "last_sync_at = excluded.last_sync_at, last_seen_hash = excluded.last_seen_hash",
-        (str(p), now_iso(), last_short),
+        "INSERT INTO git_sync_state(repo_path, last_sync_at, last_seen_hash, branch) "
+        "VALUES (?, ?, ?, ?) ON CONFLICT(repo_path) DO UPDATE SET "
+        "last_sync_at = excluded.last_sync_at, last_seen_hash = excluded.last_seen_hash, "
+        "branch = excluded.branch",
+        # store the FULL HEAD hash (not the short one) so the next sync's
+        # `head_hash() == last_seen_hash` cheap-skip actually triggers
+        (str(p), now_iso(), head, branch),
     )
+    # one transaction for all inserts + all events (instead of 2 fsyncs per commit)
+    for ev in pending_events:
+        events.append(conn, "git", ev["hash"], "commit", ev, commit=False)
     conn.commit()
     return {"repo_path": str(p), "branch": branch, "new": new, "total": total}
+
+
+def state_branch(conn: sqlite3.Connection, repo_path: str) -> str | None:
+    """Branch recorded at the last sync, if any."""
+    row = conn.execute(
+        "SELECT branch FROM git_sync_state WHERE repo_path = ?", (repo_path,)
+    ).fetchone()
+    return row["branch"] if row else None
 
 
 def sync_all(conn: sqlite3.Connection, home=None) -> dict:
@@ -191,7 +248,8 @@ def commits(
         clauses.append("parsed_task_id IS NULL AND parsed_feature IS NULL")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
-        f"SELECT * FROM git_commits {where} ORDER BY committed_at DESC, hash DESC LIMIT ?",
+        f"SELECT * FROM git_commits {where} "
+        "ORDER BY datetime(committed_at) DESC, hash DESC LIMIT ?",
         (*values, limit),
     ).fetchall()
     return [GitCommit.from_row(r) for r in rows]
@@ -206,32 +264,47 @@ def unparsed_commits(conn: sqlite3.Connection, repo_path: str | None = None) -> 
 
 
 def status(conn: sqlite3.Connection, project_id: int) -> dict:
-    """Git snapshot for a project: link, branch, last commit, today's count."""
+    """Git snapshot for a project: link, branch, last commit, today's count.
+
+    Pure DB reads (no git subprocess except one rev-parse if never synced):
+    the watcher thread already keeps git_commits / git_sync_state up to date.
+    """
     repo = get_link(conn, project_id)
     if repo is None:
         return {"project_id": project_id, "linked": False}
-    branch = None
-    last = None
-    today_count = 0
-    sync_state = None
-    try:
-        branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() or "HEAD"
-        all_commits = commits(conn, repo_path=repo, limit=10000)
-        if all_commits:
-            last = all_commits[0].to_dict()
-        from datetime import datetime, timezone
-        cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
-        today_count = sum(1 for c in all_commits if c.committed_at >= cutoff)
-    except GitError as e:
-        return {"project_id": project_id, "linked": True, "repo_path": repo, "error": str(e)}
-    row = conn.execute(
-        "SELECT last_sync_at, last_seen_hash FROM git_sync_state WHERE repo_path = ?", (repo,)
+
+    state = conn.execute(
+        "SELECT last_sync_at, last_seen_hash, branch FROM git_sync_state WHERE repo_path = ?",
+        (repo,),
     ).fetchone()
-    if row:
-        sync_state = dict(row)
+    branch = state["branch"] if state and state["branch"] else None
+    if branch is None:
+        try:  # never synced yet: one cheap subprocess to learn the branch
+            branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() or "HEAD"
+        except GitError as e:
+            return {"project_id": project_id, "linked": True, "repo_path": repo, "error": str(e)}
+
+    # last commit + today's count straight from the cache (no full table scan)
+    last = conn.execute(
+        "SELECT hash, short, author, message, branch, committed_at, parsed_task_id, "
+        "parsed_feature FROM git_commits WHERE repo_path = ? "
+        "ORDER BY datetime(committed_at) DESC LIMIT 1",
+        (repo,),
+    ).fetchone()
+    today_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM git_commits WHERE repo_path = ? "
+        "AND datetime(committed_at) >= datetime(?)",
+        (repo, day_start_utc(0)),
+    ).fetchone()["c"]
+    total = conn.execute(
+        "SELECT COUNT(*) AS c FROM git_commits WHERE repo_path = ?", (repo,)
+    ).fetchone()["c"]
+
     return {
         "project_id": project_id, "linked": True, "repo_path": repo,
-        "branch": branch, "last_commit": last, "commits_today": today_count,
-        "last_sync_at": sync_state["last_sync_at"] if sync_state else None,
-        "cached_commits": len(all_commits),
+        "branch": branch,
+        "last_commit": dict(last) if last else None,
+        "commits_today": today_count,
+        "last_sync_at": state["last_sync_at"] if state else None,
+        "cached_commits": total,
     }

@@ -8,7 +8,7 @@ import sqlite3
 
 from . import events, gitwatch, projects, sessions, stats
 from . import tasks as tsk
-from .models import now_iso
+from .models import day_start_utc, now_iso
 
 
 def snapshot(conn: sqlite3.Connection, project_id: int | None = None) -> dict:
@@ -28,10 +28,12 @@ def snapshot(conn: sqlite3.Connection, project_id: int | None = None) -> dict:
         return data
 
     open_tasks = tsk.list(conn, project_id=pid, status=["todo", "in_progress"])
-    done_today = [
-        t for t in tsk.list(conn, project_id=pid, status="done")
-        if (t.completed_at or "")[:10] == stats._today_str()
-    ]
+    # one COUNT query instead of loading every done task
+    done_today = conn.execute(
+        "SELECT COUNT(*) AS c FROM tasks WHERE project_id = ? AND status = 'done' "
+        "AND completed_at >= ?",
+        (pid, day_start_utc(0)),
+    ).fetchone()["c"]
     s = sessions.current(conn)
     if s is not None and s.project_id != pid:
         s = None  # running session belongs to another project
@@ -39,7 +41,7 @@ def snapshot(conn: sqlite3.Connection, project_id: int | None = None) -> dict:
         "tasks": {
             "open": len(open_tasks),
             "in_progress": [t.to_dict() for t in open_tasks if t.status == "in_progress"],
-            "done_today": len(done_today),
+            "done_today": done_today,
         },
         "session": None if s is None else {**s.to_dict(), "elapsed_min": sessions.elapsed_min(s)},
         "today_minutes": stats.today_minutes(conn, pid),

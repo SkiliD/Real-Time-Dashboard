@@ -6,7 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from devdash.core import stats
+from devdash.core import projects, sessions, stats, tasks as tsk
 from devdash.core.i18n import tr, tr_cols
 from ..deps import get_conn, resolve_project
 from ..output import emit
@@ -20,7 +20,6 @@ def _pid(ctx, project: str | None) -> tuple:
     if project:
         return conn, resolve_project(conn, project).id
     active_pid = None
-    from devdash.core import projects
     active = projects.get_active(conn)
     if active:
         active_pid = active.id
@@ -39,9 +38,8 @@ def _minutes_block(conn, pid, days: int) -> dict:
 def today_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
     """Today: minutes worked, tasks done, current session, streak."""
     conn, pid = _pid(ctx, project)
-    done_today = [t for t in __import__("devdash.core.tasks", fromlist=["list"]).list(conn, project_id=pid, status="done")
-                  if (t.completed_at or "")[:10] == stats._today_str()]
-    from devdash.core import sessions
+    done_today = [t for t in tsk.list(conn, project_id=pid, status="done")
+                  if (t.completed_at or "")[:10] == stats.today_str()]
     s = sessions.current(conn)
     data = {**_minutes_block(conn, pid, 1), "tasks_done_today": len(done_today),
             "session_running": s is not None}

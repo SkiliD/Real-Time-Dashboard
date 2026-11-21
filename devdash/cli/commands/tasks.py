@@ -8,7 +8,7 @@ from rich.table import Table
 
 from devdash.core import tasks as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, resolve_project
+from ..deps import get_conn, guard, resolve_project
 from ..output import emit
 
 app = typer.Typer(help=tr("group.task.help"))
@@ -120,7 +120,7 @@ def show_task(ctx: typer.Context, task_id: int) -> None:
 
 def _set_status(ctx, task_id: int, status: str, verb_key: str) -> None:
     conn = get_conn(ctx)
-    task = core.set_status(conn, task_id, status)
+    task = guard(core.set_status, conn, task_id, status)
     emit(ctx, task.to_dict(), lambda: console.print(
         tr("task.status_line", id=task.id, verb=tr(verb_key), title=task.title)
     ))
@@ -136,7 +136,7 @@ def done_task(ctx: typer.Context, task_id: int) -> None:
 def start_task(ctx: typer.Context, task_id: int) -> None:
     """Start working on a task (other in-progress tasks of the project go back to todo)."""
     conn = get_conn(ctx)
-    task = core.start(conn, task_id)
+    task = guard(core.start, conn, task_id)
     emit(ctx, task.to_dict(), lambda: console.print(
         tr("task.started", id=task.id, title=task.title)
     ))
@@ -166,9 +166,9 @@ def edit_task(
 ) -> None:
     """Edit a task's fields."""
     conn = get_conn(ctx)
-    task = core.update(conn, task_id, title=title, description=description,
-                       priority=priority, estimate_min=est,
-                       tags=tag if tag else None)
+    task = guard(core.update, conn, task_id, title=title, description=description,
+                 priority=priority, estimate_min=est,
+                 tags=tag if tag else None)
     emit(ctx, task.to_dict(), lambda: console.print(
         tr("task.updated", id=task.id, title=task.title)
     ))
