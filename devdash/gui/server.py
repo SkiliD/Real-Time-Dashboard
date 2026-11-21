@@ -30,6 +30,7 @@ GET_ROUTES = {
     "/api/projects": lambda api, q: api.projects(),
     "/api/detect": lambda api, q: api.detect_path(q),
     "/api/tasks": lambda api, q: api.tasks(q),
+    "/api/tags": lambda api, q: api.tags(q),
     "/api/status": lambda api, q: api.status(),
     "/api/events": lambda api, q: api.events_since(q.get("since", "0")),
     "/api/session/current": lambda api, q: api.session_current(),
@@ -37,6 +38,8 @@ GET_ROUTES = {
     "/api/logs": lambda api, q: api.logs_list(q),
     "/api/git/status": lambda api, q: api.git_status(q),
     "/api/git/commits": lambda api, q: api.git_commits(q),
+    "/api/git/repos": lambda api, q: api.git_repos(),
+    "/api/files": lambda api, q: api.files_list(),
     "/api/features": lambda api, q: api.features_list(q),
     "/api/features/show": lambda api, q: api.features_show(q),
     "/api/ai/status": lambda api, q: api.ai_status(),
@@ -75,6 +78,8 @@ POST_ROUTES = {
     "/api/features/reject": lambda api, body: api.features_reject(body),
     "/api/features/reopen": lambda api, body: api.features_reopen(body),
     "/api/features/detach": lambda api, body: api.features_detach(body),
+    "/api/features/update": lambda api, body: api.features_update(body),
+    "/api/features/delete": lambda api, body: api.features_delete(body),
     "/api/ai/ask": lambda api, body: api.ai_ask(body),
     "/api/ai/summarize": lambda api, body: api.ai_summarize(body),
     "/api/ai/plan": lambda api, body: api.ai_plan(body),
@@ -208,6 +213,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(raw_len)
         except ValueError:
             self._send_json({"error": "invalid Content-Length"}, 400)
+            return
+        if length < 0:
+            self._send_json({"error": "negative Content-Length"}, 400)
             return
         if length > MAX_BODY_BYTES:
             self._send_json({"error": "body too large"}, 413)

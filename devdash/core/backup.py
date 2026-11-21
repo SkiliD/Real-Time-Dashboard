@@ -41,13 +41,17 @@ def make_backup(home: Path | None = None, out_dir: str | Path | None = None) -> 
         dst.close()
     finally:
         src.close()
+        # never leave the temp snapshot behind, even if the zip step fails later
+        # (it is unlinked again below; this covers exceptions between the two)
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(tmp, "devdash.db")
-        cfg_path = cfgmod.config_path(home)
-        if cfg_path.exists():
-            z.write(cfg_path, "config.json")
-    tmp.unlink(missing_ok=True)
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(tmp, "devdash.db")
+            cfg_path = cfgmod.config_path(home)
+            if cfg_path.exists():
+                z.write(cfg_path, "config.json")
+    finally:
+        tmp.unlink(missing_ok=True)
     # the zip contains config.json (API key): same 0600 as the db/config files
     # (best-effort — Windows only honors the read-only bit)
     try:
@@ -97,6 +101,10 @@ def export_json(home: Path | None = None, out_dir: str | Path | None = None) -> 
         path = Path.cwd() / f"devdash-export-{ts}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=1, default=str),
                     encoding="utf-8")
+    try:
+        path.chmod(0o600)  # the export contains the whole history: same 0600 as the db
+    except OSError:
+        pass
     return {
         "path": str(path),
         "rows": sum(len(v) for v in payload["tables"].values()),

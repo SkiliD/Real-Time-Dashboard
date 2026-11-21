@@ -38,8 +38,8 @@ def _maybe_start_break(conn, cfg, stopped, confirm=None) -> bool:
         return False
     if not confirm(tr("timer.break_prompt", brk=cfg.pomodoro_break_min), default=True):
         return False
-    brk = core.start(conn, stopped.project_id, task_id=stopped.task_id,
-                     kind="pause", minutes=cfg.pomodoro_break_min)
+    brk = guard(core.start, conn, stopped.project_id, task_id=stopped.task_id,
+                kind="pause", minutes=cfg.pomodoro_break_min)
     console.print(tr("timer.break_started", id=brk.id, brk=cfg.pomodoro_break_min))
     return True
 
@@ -63,7 +63,7 @@ def _interactive_timer(conn, pomodoro: bool) -> None:
     except KeyboardInterrupt:
         print()
         note = typer.prompt(tr("timer.prompt"), default="", show_default=False)
-        stopped = core.stop(conn, note=note)
+        stopped = guard(core.stop, conn, note=note)
         console.print(
             tr("timer.stopped", id=stopped.id, dur=stopped.duration_min)
         )
@@ -77,7 +77,8 @@ def start_cmd(
     ctx: typer.Context,
     task: int | None = typer.Option(None, "--task", "-t", help=tr("opt.task_session")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
-    kind: str = typer.Option("focus", "--kind", help=tr("opt.kind", list=", ".join(core.VALID_KINDS))),
+    kind: str = typer.Option("focus", "--kind",
+                             help=tr("opt.kind", list=", ".join(core.VALID_KINDS))),
     minutes: int | None = typer.Option(None, "--minutes", "-m", help=tr("opt.minutes")),
     background: bool = typer.Option(False, "--background", "-b", help=tr("opt.background")),
     pomodoro: bool = typer.Option(False, "--pomodoro", help=tr("opt.pomodoro")),
@@ -85,7 +86,7 @@ def start_cmd(
     """Start a work session (interactive timer unless --background)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    session = core.start(conn, proj.id, task_id=task, kind=kind, minutes=minutes)
+    session = guard(core.start, conn, proj.id, task_id=task, kind=kind, minutes=minutes)
     data = {**session.to_dict(), "project": proj.slug}
 
     def render() -> None:
@@ -103,7 +104,7 @@ def start_cmd(
 def stop_cmd(
     ctx: typer.Context,
     note: str = typer.Option("", "--note", "-n", help=tr("opt.note")),
-    id: int | None = typer.Option(None, "--id", help=tr("opt.id")),
+    id: int | None = typer.Option(None, "--id", help=tr("opt.id_session")),
 ) -> None:
     """Stop a session and record its duration + note."""
     conn = get_conn(ctx)
@@ -137,10 +138,10 @@ def now_cmd(ctx: typer.Context) -> None:
 def list_cmd(
     ctx: typer.Context,
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
-    today: bool = typer.Option(False, "--today"),
-    week: bool = typer.Option(False, "--week"),
-    task: int | None = typer.Option(None, "--task", "-t"),
-    limit: int = typer.Option(50, "--limit", "-n"),
+    today: bool = typer.Option(False, "--today", help=tr("opt.today")),
+    week: bool = typer.Option(False, "--week", help=tr("opt.week")),
+    task: int | None = typer.Option(None, "--task", "-t", help=tr("opt.task")),
+    limit: int = typer.Option(50, "--limit", "-n", help=tr("opt.limit")),
 ) -> None:
     """Session history (newest first)."""
     conn = get_conn(ctx)

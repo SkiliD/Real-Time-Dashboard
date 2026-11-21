@@ -122,14 +122,15 @@ watcher en arrière-plan relève toutes les 20 secondes.
 
 | Tu veux… | Commande |
 |---|---|
-| voir les projets / changer d'actif | `devdash projects list` · `devdash projects set-active aether-vale` |
-| ajouter / lister / finir une tâche | `devdash task add "Dash" --tag gameplay --est 90` · `devdash task list` · `devdash task done 3` |
+| voir les projets / changer d'actif | `devdash projects list` · `devdash projects set-active aether-vale` · `devdash projects show aether-vale` · `devdash projects update aether-vale --status beta` · `devdash projects archive aether-vale` · `devdash projects delete aether-vale` |
+| connecter un dossier existant | `devdash projects connect "C:\\games\\aether-vale"` (moteur + git détectés automatiquement) |
+| ajouter / lister / finir une tâche | `devdash task add "Dash" --tag gameplay --est 90` · `devdash task list` · `devdash task done 3` · `devdash task start 3` · `devdash task cancel 3` · `devdash task reopen 3` · `devdash task edit 3 --priority high` · `devdash task show 3` · `devdash task delete 3` |
 | filtrer les tâches | `devdash task list --status todo --tag ui --feature dash` |
-| lancer / arrêter le minuteur | `devdash session start --task 3 --pomodoro` · `devdash session stop --note "…"` |
-| écrire dans le devlog | `devdash log add "idée : dash aérien chaîné"` · `devdash log search "dash"` |
-| voir l'activité Git | `devdash git status` · `devdash git log --task 3` · `devdash git sync` |
-| valider une feature (toi seul) | `devdash feature add dash` · `devdash feature link dash 3 4` · `devdash feature done dash` |
-| voir tes stats | `devdash status` · `devdash stats week` · `devdash stats streak` |
+| lancer / arrêter le minuteur | `devdash session start --task 3 --pomodoro` · `devdash session stop --note "…"` · `devdash session now` · `devdash session list --week` |
+| écrire dans le devlog | `devdash log add "idée : dash aérien chaîné"` · `devdash log search "dash"` · `devdash log recent` · `devdash log edit 2 --tags idée` · `devdash log delete 2` |
+| voir l'activité Git | `devdash git status` · `devdash git log --task 3` · `devdash git sync` · `devdash git link <chemin>` · `devdash git unlink` · `devdash git ignore` |
+| gérer les features (toi seul les valides) | `devdash feature add dash` · `devdash feature list` · `devdash feature show dash` · `devdash feature link dash 3 4` · `devdash feature unlink dash 3` · `devdash feature done dash` · `devdash feature approve dash` · `devdash feature reject dash` · `devdash feature edit dash --name air-dash` · `devdash feature delete dash` · `devdash feature reopen dash` |
+| voir tes stats | `devdash status` · `devdash stats today` · `devdash stats week` · `devdash stats month` · `devdash stats streak` · `devdash stats tags` · `devdash stats all` |
 | tout sauvegarder | `devdash backup --out D:\backups` (zip horodaté) |
 | exporter / réimporter les données | `devdash export --out export.json` · `devdash import export.json` |
 | de l'aide IA | `devdash ai ask "où en suis-je ?"` · `devdash ai plan "système de combat" --apply` · `devdash ai verify 3` · `devdash ai context` |
@@ -241,7 +242,7 @@ local + fenêtre native PyWebView) ne sont que des habillages au-dessus — c'es
 ça qu'elles sont toujours d'accord.
 
 ```bash
-PYTHONPATH=. python -m pytest -q    # 119 tests
+PYTHONPATH=. python -m pytest -q    # 228+ tests
 ```
 
 En option : `pip install playwright && playwright install chromium` active un vrai

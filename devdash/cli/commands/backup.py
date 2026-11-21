@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -85,6 +86,10 @@ def import_cmd(
         existing = conn.execute("SELECT COUNT(*) AS c FROM projects").fetchone()["c"]
         if existing and not force:
             raise _typer.BadParameter(tr("err.import_not_empty"))
+        # interactively ask once; in --json / piped mode --force alone is the consent
+        interactive = not (ctx.obj and ctx.obj.get("json")) and sys.stdin.isatty()
+        if existing and force and interactive and not _typer.confirm(tr("import.force_confirm"), default=False):
+            raise _typer.Abort()
         # column names come from the file: validate them against the real schema
         # (whitelist of tables, whitelist of columns -> no SQL injection)
         conn.execute("PRAGMA foreign_keys = OFF")

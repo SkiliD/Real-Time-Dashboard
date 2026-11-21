@@ -115,6 +115,10 @@ La GUI sert une page locale (thème sombre) depuis un petit serveur HTTP
 temps réel : la GUI interroge le bus d'événements SQLite toutes les 1,5 s
 et un watcher Git scanne les dépôts liés toutes les `git_watch_interval_sec`
 (20 s par défaut) — un nouveau commit rafraîchit le dashboard sans redémarrage.
+Des endpoints en lecture seule exposent aussi la liste des tags (`GET /api/tags`),
+les dépôts Git liés (`GET /api/git/repos`) et les fichiers de `DEVDASH_HOME`
+(`GET /api/files` : sauvegardes/exports, jamais `config.json`), confinés au
+répertoire home local.
 
 Onglets : **Tâches** (kanban), **Devlog**, **Git**, **Features**, **Stats**
 (graphiques Chart.js embarqués), **Assistant IA** (visible uniquement si l'IA
@@ -150,8 +154,11 @@ la commande) pour une sortie machine.
 | `git log` | `devdash git log --task 3` | commits liés à une tâche (`--unparsed` = non reconnus) |
 | `git status` | `devdash git status` | branche, dernier commit, commits/jour |
 | `git ignore` | `devdash git ignore [--repo <path>]` | écrit/rafraîchit le **bloc balisé** `# >>> devdash >>>` dans le `.gitignore` du dépôt lié : `.devdash/`, `devdash.db*`, snapshots, `devdash-backup-*.zip`, `devdash-export-*.json`, et `<home>/config.json` si `DEVDASH_HOME` est dans le dépôt (clés API). Idempotent (jamais dupliqué), contenu existant préservé. **Seul fichier que DevDash écrit dans votre dépôt, et seulement sur cette commande explicite** — l'historique git reste intouché |
-| `feature add/link/done` | `devdash feature add dash` ; `devdash feature link dash 3 4` ; `devdash feature done dash` | **validation manuelle** d'une feature |
-| `feature approve/reject` | `devdash feature reject dash --feedback "pas assez testé"` | approuver/rejeter une proposition (le rejet est mémorisé) |
+| `feature add/list/show` | `devdash feature add dash` ; `devdash feature list` ; `devdash feature show dash` | création/liste/détail (progression, tâches liées) |
+| `feature link/unlink` | `devdash feature link dash 3 4` ; `devdash feature unlink dash 3` | attacher/détacher des tâches |
+| `feature done/reopen` | `devdash feature done dash` ; `devdash feature reopen dash` | **validation manuelle** d'une feature (seul un humain peut la fermer) |
+| `feature approve/reject` | `devdash feature reject dash --feedback "pas assez testé"` | approuver/rejeter une proposition IA (le rejet est mémorisé) |
+| `feature edit/delete` | `devdash feature edit dash --name air-dash` ; `devdash feature delete dash --yes` | renommage (unique par projet) / suppression définitive (les tâches sont détachées, jamais supprimées) ; aussi éditable depuis la GUI (✎/🗑 sur la carte feature) via `POST /api/features/update` et `POST /api/features/delete` |
 | `status` | `devdash status` ; `devdash status --watch` | instantané temps réel (tâches, session, streak, git) |
 | `stats today/week/month/streak/tags/all` | `devdash stats week` | temps, tâches faites, streak, répartition par tag |
 | `ai context` | `devdash ai context` | **affiche le contexte exact** qui serait envoyé à l'IA — rien n'est envoyé, même IA activée |
@@ -403,7 +410,7 @@ devdash/
 │   ├── desktop.py        #   run(): fenêtre native, ou --browser
 │   └── static/           #   index.html / app.js / styles.css (thème sombre)
 │                         #   + vendor/chart.umd.min.js (Chart.js embarqué, hors-ligne)
-└── tests/                # pytest (119 tests)
+└── tests/                # pytest (228+ tests)
 ```
 
 **Pourquoi Python** : stdlib riche (sqlite3, http.server, json, dataclasses),
@@ -422,7 +429,7 @@ WebView2 système (~30-60 Mo), bien moins qu'une app Electron.
 
 ```bash
 pip install -e ".[test]"
-PYTHONPATH=. python -m pytest -q   # 119 tests : core, CLI, sessions, logs, git, GUI,
+PYTHONPATH=. python -m pytest -q   # 228+ tests : core, CLI, sessions, logs, git, GUI,
                                    # features, IA, stats, status, review, sécurité
 ```
 

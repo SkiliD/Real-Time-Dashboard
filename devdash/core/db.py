@@ -16,9 +16,13 @@ _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
     """Open (and create if needed) the database at db_path."""
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # busy_timeout: with the threaded GUI server + git watcher + CLI running
+    # concurrently, a second writer must WAIT instead of failing immediately
+    # with "database is locked" (default timeout is 0).
+    conn.execute("PRAGMA busy_timeout = 10000")
     try:
         # WAL: readers (GUI polling) never block writers (CLI actions).
         conn.execute("PRAGMA journal_mode = WAL")
@@ -34,15 +38,21 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Apply schema.sql (idempotent), run lightweight migrations, stamp version."""
+    """Apply schema.sql (idempotent), run lightweight migrations, stamp version.
+
+    Note: executescript() commits implicitly, but schema.sql is fully
+    idempotent (IF NOT EXISTS), so re-running after a crash is safe. The
+    destructive part (migrations: DROP/ALTER) + the version stamp run in ONE
+    transaction so a crash mid-migration cannot leave a half-migrated schema.
+    """
     conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
-    _migrate(conn)
-    conn.execute(
-        "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (str(SCHEMA_VERSION),),
-    )
-    conn.commit()
+    with conn:  # one transaction: migrations + version stamp
+        _migrate(conn)
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(SCHEMA_VERSION),),
+        )
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -53,8 +63,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """
     version = schema_version(conn)
     if version == 0:
-        conn.commit()
-        return
+        return  # fresh database: schema.sql already applied; stamp done by caller
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if "planned_min" not in cols:  # v2
         conn.execute("ALTER TABLE sessions ADD COLUMN planned_min INTEGER")
@@ -87,7 +96,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         sync_cols = {r["name"] for r in conn.execute("PRAGMA table_info(git_sync_state)").fetchall()}
         if "branch" not in sync_cols:
             conn.execute("ALTER TABLE git_sync_state ADD COLUMN branch TEXT")
-    conn.commit()
+    # no commit here: init_db wraps _migrate in a single transaction
 
 
 def schema_version(conn: sqlite3.Connection) -> int:

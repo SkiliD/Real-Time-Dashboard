@@ -66,12 +66,14 @@ app.command("gui", help=tr("cmd.gui.help"))(gui)
 
 
 @app.command(help=tr("cmd.version"))
-def version() -> None:
+def version(ctx: typer.Context) -> None:
     """Print the DevDash version + git head when running from a checkout."""
     from devdash.core import updater
+    from .output import emit
     st = updater.git_status()
     suffix = f" (git {st['head']} @ {st['branch']})" if st.get("git") else f" ({st['mode']})"
-    typer.echo(f"devdash {__version__}{suffix}")
+    data = {"version": __version__, **{k: st.get(k) for k in ("mode", "git", "head", "branch", "dirty")}}
+    emit(ctx, data, lambda: typer.echo(f"devdash {__version__}{suffix}"))
 
 
 def entrypoint() -> None:

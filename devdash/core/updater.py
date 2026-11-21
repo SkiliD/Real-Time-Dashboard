@@ -92,7 +92,11 @@ def check_for_updates(repo: Path | None = None, fetch: bool = True) -> dict:
     if rc != 0:
         return {"git": True, "error": "no upstream branch configured (git branch --set-upstream-to)"}
     _, counts = _git(repo, "rev-list", "--left-right", "--count", "HEAD...@{u}")
-    ahead, behind = (counts.split() + ["0", "0"])[:2]
+    try:
+        ahead, behind = (counts.split() + ["0", "0"])[:2]
+        int(behind); int(ahead)  # validate before use
+    except (ValueError, IndexError):
+        return {"git": True, "error": f"unexpected git rev-list output: {counts[:120]!r}"}
     _, local = _git(repo, "rev-parse", "--short", "HEAD")
     _, remote = _git(repo, "rev-parse", "--short", "@{u}")
     return {

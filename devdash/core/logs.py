@@ -10,7 +10,7 @@ import json
 import sqlite3
 
 from . import events, projects
-from .models import LogEntry, now_iso
+from .models import LogEntry, escape_like, now_iso
 
 
 def add(
@@ -35,15 +35,15 @@ def add(
         if _tasks.get(conn, task_id) is None:
             raise KeyError(f"no task #{task_id}")
     now = now_iso()
-    cur = conn.execute(
-        "INSERT INTO log_entries(project_id, task_id, content, tags, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (project_id, task_id, content, json.dumps([str(t) for t in tags]), now),
-    )
-    conn.commit()
-    entry = get(conn, cur.lastrowid)
-    assert entry is not None
-    events.append(conn, "log", entry.id, "created", entry.to_dict())
+    with conn:  # row + event in one transaction
+        cur = conn.execute(
+            "INSERT INTO log_entries(project_id, task_id, content, tags, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (project_id, task_id, content, json.dumps([str(t) for t in tags]), now),
+        )
+        entry = get(conn, cur.lastrowid)
+        assert entry is not None
+        events.append(conn, "log", entry.id, "created", entry.to_dict(), commit=False)
     return entry
 
 
@@ -69,9 +69,8 @@ def list(
         values.append(task_id)
     if query:
         # escape LIKE wildcards in user input, keep case-insensitive substring match
-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         clauses.append("content LIKE ? ESCAPE '\\'")
-        values.append(f"%{escaped}%")
+        values.append(f"%{escape_like(query)}%")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         f"SELECT * FROM log_entries {where} ORDER BY created_at DESC, id DESC LIMIT ?",
@@ -105,11 +104,14 @@ def update(
         values.append(json.dumps([str(t) for t in tags]))
     if fields:
         values.append(entry_id)
-        conn.execute(f"UPDATE log_entries SET {', '.join(fields)} WHERE id = ?", values)
-        conn.commit()
+        with conn:  # row + event in one transaction
+            conn.execute(f"UPDATE log_entries SET {', '.join(fields)} WHERE id = ?", values)
+            entry = get(conn, entry_id)
+            assert entry is not None
+            events.append(conn, "log", entry.id, "updated", entry.to_dict(), commit=False)
+        return entry
     entry = get(conn, entry_id)
     assert entry is not None
-    events.append(conn, "log", entry.id, "updated", entry.to_dict())
     return entry
 
 

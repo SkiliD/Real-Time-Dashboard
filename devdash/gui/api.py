@@ -38,18 +38,18 @@ class Api:
     def _conn(self):
         home = self.home or config.devdash_home()
         conn = db.connect(config.db_path(home))
-        # init_db runs the full schema script + a write commit: do it ONCE per
-        # process, not on every request (the event poll hits this 1.5s apart)
-        if not self._db_ready:
-            with self._db_lock:
-                if not self._db_ready:
-                    db.init_db(conn)
-                    ev.prune(conn)  # bound the append-only event bus once per process
-                    self._db_ready = True
         try:
+            # init_db runs the full schema script + a write commit: do it ONCE per
+            # process, not on every request (the event poll hits this 1.5s apart)
+            if not self._db_ready:
+                with self._db_lock:
+                    if not self._db_ready:
+                        db.init_db(conn)
+                        ev.prune(conn)  # bound the append-only event bus once per process
+                        self._db_ready = True
             yield conn
         finally:
-            conn.close()
+            conn.close()  # always closed, even if init_db raised
 
     # --- input helpers: bad client input is a 400, never a 500 -------------
 
@@ -68,6 +68,31 @@ class Api:
         if hi is not None:
             n = max(1, min(hi, n))
         return n
+
+    @staticmethod
+    def _str(body: dict, key: str, default: str = "", required: bool = False, max_len: int = 100_000) -> str:
+        """Fetch a string field; wrong type is a clean 400, never a 500."""
+        if key not in body or body[key] is None:
+            if required:
+                raise ApiError(f"{key} is required")
+            return default
+        v = body[key]
+        if not isinstance(v, str):
+            raise ApiError(f"invalid {key}: expected a string, got {type(v).__name__}")
+        if len(v) > max_len:
+            raise ApiError(f"{key} is too long (max {max_len} chars)")
+        return v
+
+    @staticmethod
+    def _tags(value) -> list[str]:
+        """Validate a tags field: must be a list of strings (a bare string is NOT
+        split into characters — that was a bug)."""
+        if value is None:
+            return []
+        if isinstance(value, str) or not isinstance(value, list) \
+                or not all(isinstance(t, str) for t in value):
+            raise ApiError("tags must be a list of strings")
+        return value
 
     def _list_pid(self, c, query: dict) -> int | None:
         """Scope for list endpoints: explicit project=... wins; 'all'/'*' means
@@ -92,14 +117,17 @@ class Api:
             }
 
     def projects_create(self, body: dict) -> dict:
+        name = self._str(body, "name", required=True).strip()
+        if not name:
+            raise ApiError("name is required")
         try:
             with self._conn() as c:
                 p = proj.create(
-                    c, body["name"],
-                    description=body.get("description", ""),
-                    engine=body.get("engine", "other"),
-                    color=body.get("color", "#8a8f98"),
-                    status=body.get("status", "idea"),
+                    c, name,
+                    description=self._str(body, "description"),
+                    engine=self._str(body, "engine", "other") or "other",
+                    color=self._str(body, "color", "#8a8f98") or "#8a8f98",
+                    status=self._str(body, "status", "idea") or "idea",
                 )
                 if body.get("set_active"):
                     proj.set_active(c, p.id)
@@ -139,31 +167,33 @@ class Api:
         """Probe an existing folder: engine markers, suggested name, git root.
         Read-only filesystem probing; bounded input."""
         from devdash.core import detect
-        path = query.get("path") or ""
-        if len(path) > 4096:
+        raw = query.get("path") or ""
+        if not isinstance(raw, str):
+            raise ApiError("invalid path: expected a string")
+        if len(raw) > 4096:
             raise ApiError("path too long")
-        return detect.detect_project(path)
+        return detect.detect_project(raw)
 
     def projects_connect(self, body: dict) -> dict:
         """Connect an EXISTING project folder: create the DevDash project with
         auto-detected engine/name, and auto-link the enclosing git repo
         (read-only) unless no_git is set."""
         from devdash.core import config as _cfg, detect, gitwatch
-        path = (body.get("path") or "").strip()
+        path = self._str(body, "path", required=True).strip()
         if not path:
             raise ApiError("path is required")
         info = detect.detect_project(path)
         if not info["is_dir"]:
             raise ApiError(f"not a directory: {path}")
         with self._conn() as c:
-            engine = (body.get("engine") or info["engine"] or "other").lower()
+            engine = (self._str(body, "engine") or info["engine"] or "other").lower()
             try:
                 p = proj.create(
-                    c, (body.get("name") or "").strip() or info["name"] or info["path"],
-                    description=body.get("description", ""),
+                    c, (self._str(body, "name").strip() or info["name"] or info["path"]),
+                    description=self._str(body, "description"),
                     engine=engine,
-                    color=body.get("color") or "#8a8f98",
-                    status=body.get("status") or "idea",
+                    color=self._str(body, "color", "#8a8f98") or "#8a8f98",
+                    status=self._str(body, "status", "idea") or "idea",
                 )
             except ValueError as e:
                 raise ApiError(str(e))
@@ -205,6 +235,13 @@ class Api:
             raise ApiError("no active project (create one or pass project=...)", status=400)
         return p
 
+    def tags(self, query: dict) -> dict:
+        """All distinct task tags (unfiltered) — feeds the GUI tag filter select,
+        which must list every tag even while a tag filter is active."""
+        with self._conn() as c:
+            pid = self._list_pid(c, query)
+            return {"tags": tsk.list_tags(c, project_id=pid)}
+
     def tasks(self, query: dict) -> dict:
         with self._conn() as c:
             pid = self._list_pid(c, query)  # defaults to the ACTIVE project
@@ -229,14 +266,11 @@ class Api:
         kwargs = {}
         for key in ("title", "description", "priority"):  # status changes go through /api/tasks/status
             if key in body:
-                kwargs[key] = body[key]
+                kwargs[key] = self._str(body, key)  # wrong type -> clean 400, not a 500
         if "estimate_min" in body:
             kwargs["estimate_min"] = self._int(body["estimate_min"], "estimate_min")
         if "tags" in body:
-            tags = body["tags"]
-            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
-                raise ApiError("tags must be a list of strings")
-            kwargs["tags"] = tags
+            kwargs["tags"] = self._tags(body["tags"])
         if "parent_id" in body:
             kwargs["parent_id"] = self._int(body["parent_id"], "parent_id")  # None clears
         if "feature_id" in body:
@@ -244,8 +278,9 @@ class Api:
         with self._conn() as c:
             try:
                 t = tsk.update(c, tid, **kwargs)
-            except KeyError:
-                raise ApiError(f"no task #{tid}", status=404)
+            except KeyError as e:
+                # relay the core message verbatim ("no task #N" vs "no parent task #M")
+                raise ApiError(str(e).strip("'\"") or f"no task #{tid}", status=404)
             except ValueError as e:
                 raise ApiError(str(e))
             return t.to_dict()
@@ -263,7 +298,7 @@ class Api:
             return {"deleted": t.id, "title": t.title}
 
     def tasks_add(self, body: dict) -> dict:
-        title = body.get("title", "").strip()
+        title = self._str(body, "title", required=True).strip()
         if not title:
             raise ApiError("title is required")
         with self._conn() as c:
@@ -271,14 +306,14 @@ class Api:
             try:
                 t = tsk.add(
                     c, p.id, title,
-                    description=body.get("description", ""),
-                    priority=body.get("priority", "medium"),
+                    description=self._str(body, "description"),
+                    priority=self._str(body, "priority", "medium") or "medium",
                     estimate_min=self._int(body.get("estimate_min"), "estimate_min"),
-                    tags=body.get("tags", []),
+                    tags=self._tags(body.get("tags")),
                     parent_id=self._int(body.get("parent_id"), "parent_id"),
                 )
             except (KeyError, ValueError) as e:
-                raise ApiError(str(e))
+                raise ApiError(str(e).strip("'\""))
             return {**t.to_dict(), "project": p.slug}
 
     def tasks_set_status(self, body: dict) -> dict:
@@ -290,8 +325,8 @@ class Api:
         with self._conn() as c:
             try:
                 t = tsk.start(c, tid) if status == "in_progress" else tsk.set_status(c, tid, status)
-            except KeyError:
-                raise ApiError(f"no task #{tid}", status=404)
+            except KeyError as e:
+                raise ApiError(str(e).strip("'\"") or f"no task #{tid}", status=404)
             except ValueError as e:
                 raise ApiError(str(e))
             return t.to_dict()
@@ -528,7 +563,7 @@ class Api:
                 raise ApiError(str(e), status=400)
 
     def ai_ask(self, body: dict) -> dict:
-        q = (body.get("question") or "").strip()
+        q = self._str(body, "question", required=True).strip()
         if not q:
             raise ApiError("question is required")
         return self._ai_call(assistant.ask, q)
@@ -537,7 +572,7 @@ class Api:
         return self._ai_call(assistant.summarize_week)
 
     def ai_plan(self, body: dict) -> dict:
-        title = (body.get("title") or "").strip()
+        title = self._str(body, "title", required=True).strip()
         if not title:
             raise ApiError("title is required")
         # apply=True is the explicit human consent (GUI confirm button)
@@ -574,12 +609,15 @@ class Api:
             return {"count": len(rows), "features": rows}
 
     def features_add(self, body: dict) -> dict:
-        name = (body.get("name") or "").strip()
+        name = self._str(body, "name", required=True).strip()
         if not name:
             raise ApiError("name is required")
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
-            f = feats.create(c, p.id, name, body.get("description", ""))
+            try:
+                f = feats.create(c, p.id, name, self._str(body, "description"))
+            except (KeyError, ValueError) as e:
+                raise ApiError(str(e).strip("'\""))
             return {**f.to_dict(), "project": p.slug, "progress": feats.progress(c, f.id)}
 
     def _feature_ref(self, c, body):
@@ -598,7 +636,9 @@ class Api:
             try:
                 f = feats.attach(c, f.id, tid)
             except KeyError as e:
-                raise ApiError(str(e), status=404)
+                raise ApiError(str(e).strip("'\""), status=404)
+            except ValueError as e:  # e.g. task belongs to another project
+                raise ApiError(str(e))
             return {**f.to_dict(), "progress": feats.progress(c, f.id)}
 
     def features_done(self, body: dict) -> dict:
@@ -633,6 +673,31 @@ class Api:
             f = feats.reopen(c, f.id)
             return f.to_dict()
 
+    def features_update(self, body: dict) -> dict:
+        """Rename / edit a feature (name unique per project)."""
+        with self._conn() as c:
+            p, f = self._feature_ref(c, body)
+            kwargs = {}
+            if "name" in body:
+                kwargs["name"] = self._str(body, "name")
+            if "description" in body:
+                kwargs["description"] = self._str(body, "description")
+            try:
+                f = feats.update(c, f.id, p.id, **kwargs)
+            except (KeyError, ValueError) as e:
+                raise ApiError(str(e).strip("'\""))
+            return f.to_dict()
+
+    def features_delete(self, body: dict) -> dict:
+        """Hard delete (explicit user action; the GUI confirms first). Tasks keep existing (detached)."""
+        with self._conn() as c:
+            p, f = self._feature_ref(c, body)
+            try:
+                f = feats.delete(c, f.id, p.id)
+            except KeyError as e:
+                raise ApiError(str(e).strip("'\""), status=404)
+            return {"deleted": f.id, "name": f.name}
+
     def features_detach(self, body: dict) -> dict:
         with self._conn() as c:
             p, f = self._feature_ref(c, body)
@@ -642,7 +707,9 @@ class Api:
             try:
                 f = feats.detach(c, f.id, tid, project_id=p.id)
             except KeyError as e:
-                raise ApiError(str(e), status=404)
+                raise ApiError(str(e).strip("'\""), status=404)
+            except ValueError as e:
+                raise ApiError(str(e))
             return {**f.to_dict(), "progress": feats.progress(c, f.id)}
 
     def features_show(self, query: dict) -> dict:
@@ -657,8 +724,8 @@ class Api:
     # --- git -------------------------------------------
 
     def git_link(self, body: dict) -> dict:
-        path = body.get("path")
-        if not path:
+        path = self._str(body, "path", required=True)
+        if not path.strip():
             raise ApiError("path is required")
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
@@ -681,8 +748,12 @@ class Api:
                 repo = gitwatch.get_link(c, p.id)
                 if repo is None:
                     raise ApiError(f"project {p.slug} has no linked repo", status=400)
-                return {"repos": [gitwatch.sync_repo(c, repo, config.load_config(self.home).commit_patterns)],
-                        "errors": []}
+                try:
+                    r = gitwatch.sync_repo(c, repo, config.load_config(self.home).commit_patterns)
+                except gitwatch.GitError as e:  # same error collection as sync_all
+                    return {"repos": [], "errors": [{"project_id": p.id,
+                                                      "repo_path": repo, "error": str(e)}]}
+                return {"repos": [r], "errors": []}
             return gitwatch.sync_all(c, home=self.home)
 
     def git_commits(self, query: dict) -> dict:
@@ -704,12 +775,37 @@ class Api:
             data["project"] = p.slug
             return data
 
+    def git_repos(self) -> dict:
+        """All linked repos (project_id + path). Read-only."""
+        with self._conn() as c:
+            return {"repos": [{"project_id": pid, "repo_path": path}
+                              for pid, path in gitwatch.linked_repos(c)]}
+
+    def files_list(self) -> dict:
+        """List backup zips and JSON exports inside DEVDASH_HOME (never outside)."""
+        home = Path(self.home or config.devdash_home()).resolve()
+        out = {"home": str(home), "backups": [], "exports": []}
+        for sub, key in (("backups", "backups"), ("exports", "exports")):
+            d = home / sub
+            if d.is_dir():
+                for f in sorted(d.iterdir(), key=lambda p: p.name, reverse=True)[:50]:
+                    if f.is_file() and f.suffix in (".zip", ".json"):
+                        st = f.stat()
+                        out[key].append({"name": f.name, "bytes": st.st_size,
+                                         "path": str(f)})
+        return out
+
     def git_ignore(self, body: dict) -> dict:
         """Add/refresh the marker-delimited DevDash block in the linked repo's
         .gitignore (idempotent). Explicit user action; touches no git history."""
         with self._conn() as c:
             p = self._resolve_project(c, body.get("project"))
-            repo = body.get("repo") or gitwatch.get_link(c, p.id)
+            linked = gitwatch.get_link(c, p.id)
+            repo = self._str(body, "repo") or linked
+            # confinement: the .gitignore write may only target the repo LINKED
+            # to this project — never an arbitrary path on disk
+            if linked and repo != linked:
+                raise ApiError("repo must be the repo linked to this project", status=400)
             if not repo:
                 raise ApiError(f"project {p.slug} has no linked repo", status=400)
             home = self.home or config.devdash_home()
@@ -734,7 +830,7 @@ class Api:
             return {"count": len(rows), "entries": [r.to_dict() for r in rows]}
 
     def logs_add(self, body: dict) -> dict:
-        content = (body.get("content") or "").strip()
+        content = self._str(body, "content", required=True).strip()
         if not content:
             raise ApiError("content is required")
         with self._conn() as c:
@@ -742,9 +838,11 @@ class Api:
             try:
                 e = logs.add(c, content, project_id=p.id,
                              task_id=self._int(body.get("task_id"), "task_id"),
-                             tags=body.get("tags", []))
+                             tags=self._tags(body.get("tags")))
             except KeyError as e2:
-                raise ApiError(str(e2))
+                raise ApiError(str(e2).strip("'\""))
+            except ValueError as e:
+                raise ApiError(str(e))
             return {**e.to_dict(), "project": p.slug}
 
     def logs_update(self, body: dict) -> dict:
@@ -754,8 +852,8 @@ class Api:
         with self._conn() as c:
             try:
                 e = logs.update(c, eid,
-                                content=body.get("content"),
-                                tags=body.get("tags") if "tags" in body else None)
+                                content=self._str(body, "content") if "content" in body else None,
+                                tags=self._tags(body["tags"]) if "tags" in body else None)
             except KeyError:
                 raise ApiError(f"no log entry #{eid}", status=404)
             except ValueError as e:
@@ -782,11 +880,11 @@ class Api:
                 s = sess.start(
                     c, p.id,
                     task_id=self._int(body.get("task_id"), "task_id"),
-                    kind=body.get("kind", "focus"),
+                    kind=self._str(body, "kind", "focus") or "focus",
                     minutes=self._int(body.get("minutes"), "minutes"),
                 )
             except (KeyError, ValueError) as e:
-                raise ApiError(str(e))
+                raise ApiError(str(e).strip("'\""))
             return {**s.to_dict(), "project": p.slug}
 
     def session_stop(self, body: dict) -> dict:
@@ -795,7 +893,7 @@ class Api:
                 s = sess.stop(c, self._int(body.get("id"), "id"), note=body.get("note", ""))
             except KeyError as e:
                 # "no running session" is a client error (400), not a missing row
-                msg = str(e)
+                msg = str(e).strip("'\"")
                 raise ApiError(msg, status=400 if "running" in msg else 404)
             except ValueError as e:
                 raise ApiError(str(e))
@@ -838,18 +936,22 @@ class Api:
                 "active": active.to_dict(),
                 "open_tasks": len(open_tasks),
                 "in_progress": in_progress,
+                "done_today": stats.tasks_done_today(c, active.id),
                 "session": None if s is None else {
                     **s.to_dict(), "elapsed_min": sess.elapsed_min(s),
                 },
                 "today_minutes": stats.today_minutes(c, active.id),
                 "streak_days": stats.streak_days(c, active.id),
                 "progress": stats.project_progress(c, active.id),
+                "git": gitwatch.status(c, active.id),
                 "last_event_id": ev.last_id(c),
             }
 
     def events_since(self, since) -> dict:
         with self._conn() as c:
             since_id = self._int(since, "since", 0)
+            if since_id < 0:
+                raise ApiError("invalid since: must be >= 0")
             got = ev.since(c, since_id)
             # last_id must be the last event actually RETURNED: with the LIMIT
             # in ev.since, the global max would silently skip the missing ones

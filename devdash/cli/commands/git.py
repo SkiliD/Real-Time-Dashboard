@@ -67,7 +67,7 @@ def unlink_cmd(
     """Unlink the git repository of a project (cached commits are kept)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    gitwatch.unlink(conn, proj.id)
+    guard(gitwatch.unlink, conn, proj.id)
     emit(ctx, {"project": proj.slug, "linked": False},
          lambda: console.print(tr("git.unlinked", slug=proj.slug)))
 
@@ -85,7 +85,7 @@ def sync_cmd(
         repo = gitwatch.get_link(conn, proj.id)
         if repo is None:
             raise typer.BadParameter(tr("err.no_repo", slug=proj.slug))
-        result = {"repos": [gitwatch.sync_repo(conn, repo, cfgmod.load_config().commit_patterns)], "errors": []}
+        result = {"repos": [guard(gitwatch.sync_repo, conn, repo, cfgmod.load_config().commit_patterns)], "errors": []}
     else:
         result = gitwatch.sync_all(conn)
     data = result
@@ -115,9 +115,9 @@ def _render_commits(rows) -> None:
 def log_cmd(
     ctx: typer.Context,
     task: int | None = typer.Option(None, "--task", "-t", help=tr("opt.task_commits")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
     unparsed: bool = typer.Option(False, "--unparsed", help=tr("opt.unparsed")),
-    limit: int = typer.Option(50, "--limit", "-n"),
+    limit: int = typer.Option(50, "--limit", "-n", help=tr("opt.limit")),
 ) -> None:
     """List cached commits (use --task <id> for `devdash git log --task <id>`)."""
     conn = get_conn(ctx)

@@ -62,8 +62,8 @@ def add_task(
     """Add a task to a project (default: the active project)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    task = core.add(conn, proj.id, title, description=description, priority=priority,
-                    estimate_min=est, tags=tag, parent_id=parent)
+    task = guard(core.add, conn, proj.id, title, description=description, priority=priority,
+                 estimate_min=est, tags=tag, parent_id=parent)
     data = {**task.to_dict(), "project": proj.slug}
 
     def render() -> None:
@@ -77,7 +77,8 @@ def list_tasks(
     ctx: typer.Context,
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project")),
     status: list[str] = typer.Option([], "--status", "-s", help=tr("opt.filter_status")),
-    priority: str | None = typer.Option(None, "--priority", help=tr("opt.filter_priority")),
+    priority: str | None = typer.Option(None, "--priority",
+                                         help=tr("opt.filter_priority", list=", ".join(core.VALID_PRIORITIES))),
     tag: str | None = typer.Option(None, "--tag", "-t", help=tr("opt.filter_tag")),
     feature: str | None = typer.Option(None, "--feature", "-f", help=tr("opt.filter_feature")),
     all: bool = typer.Option(False, "--all", "-a", help=tr("opt.all_cancelled")),
@@ -169,10 +170,11 @@ def reopen_task(ctx: typer.Context, task_id: int) -> None:
 def edit_task(
     ctx: typer.Context,
     task_id: int,
-    title: str | None = typer.Option(None, "--title"),
-    description: str | None = typer.Option(None, "--description", "-d"),
-    priority: str | None = typer.Option(None, "--priority"),
-    est: int | None = typer.Option(None, "--est", "--estimate"),
+    title: str | None = typer.Option(None, "--title", help=tr("opt.title")),
+    description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
+    priority: str | None = typer.Option(None, "--priority",
+                                         help=tr("opt.priority", list=", ".join(core.VALID_PRIORITIES))),
+    est: int | None = typer.Option(None, "--est", "--estimate", help=tr("opt.est")),
     tag: list[str] = typer.Option([], "--tag", "-t", help=tr("opt.replace_tags")),
 ) -> None:
     """Edit a task's fields (only the options you pass are changed)."""

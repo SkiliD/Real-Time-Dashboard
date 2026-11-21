@@ -45,7 +45,7 @@
           <option value="pause" data-i18n="kind.pause">Pause</option>
           <option value="custom" data-i18n="kind.custom">Libre</option>
         </select>
-        <input id="session-minutes" type="number" min="1" max="480" step="5" data-i18n-ph="gui.sess.minutes" placeholder="min" title="Durée (min, optionnel)" style="width:64px">
+        <input id="session-minutes" type="number" min="1" max="480" step="5" data-i18n-ph="gui.sess.minutes" placeholder="min" data-i18n-title="gui.sess.minutes_tt" title="Durée (min, optionnel)" style="width:64px">
         <label class="dim chk-inline" data-i18n-title="gui.sess.pomodoro" title="Pomodoro"><input type="checkbox" id="session-pomodoro"> 🍅</label>
         <button id="btn-session-start" class="btn btn-sm btn-primary" data-i18n="gui.session_start">▶ Session</button>
         <input id="session-note" class="hidden" type="text" data-i18n-ph="gui.session_note_ph" placeholder="Note de fin (fait / blocage)…">
@@ -91,6 +91,7 @@
         <div class="col" data-status="todo"><h3><span data-i18n="gui.col.todo">À faire</span> <span class="count" id="count-todo"></span></h3><div class="cards" id="col-todo"></div></div>
         <div class="col" data-status="in_progress"><h3><span data-i18n="gui.col.in_progress">En cours</span> <span class="count" id="count-in_progress"></span></h3><div class="cards" id="col-in_progress"></div></div>
         <div class="col" data-status="done"><h3><span data-i18n="gui.col.done">Terminées</span> <span class="count" id="count-done"></span></h3><div class="cards" id="col-done"></div></div>
+        <div class="col col-cancelled" data-status="cancelled"><h3><span data-i18n="gui.col.cancelled">Annulées</span> <span class="count" id="count-cancelled"></span></h3><div class="cards" id="col-cancelled"></div></div>
       </div>
 
       <div id="tasks-empty" class="hidden"><p class="dim" data-i18n="gui.tasks.empty"></p></div>
@@ -118,7 +119,7 @@
         <button id="btn-git-link" class="btn btn-sm" data-i18n="gui.git_link">Lier le dépôt</button>
         <button id="btn-git-unlink" class="btn btn-sm" data-i18n="gui.git_unlink">Délier</button>
         <button id="btn-git-sync" class="btn btn-sm" data-i18n="gui.git_sync">↻ Sync</button>
-        <button id="btn-git-ignore" class="btn btn-sm" data-i18n="gui.git.ignore_btn" title="Ajouter le bloc DevDash au .gitignore du dépôt (fichiers locaux jamais commités)">Ajouter au .gitignore</button>
+        <button id="btn-git-ignore" class="btn btn-sm" data-i18n="gui.git.ignore_btn" data-i18n-title="gui.git.ignore_tt" title="Ajouter le bloc DevDash au .gitignore du dépôt (fichiers locaux jamais commités)">Ajouter au .gitignore</button>
         <span id="git-ignore-status" class="dim small"></span>
         <span class="spacer"></span>
         <select id="git-task-filter"><option value="" data-i18n="gui.git.all_tasks">Toutes les tâches</option></select>
@@ -316,6 +317,20 @@
       <span class="spacer"></span>
       <button id="btn-cancel-edit" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
       <button id="btn-save-edit" class="btn btn-primary" data-i18n="gui.edit.save">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-feat" class="hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3 id="feat-modal-title">Modifier la feature</h3>
+    <label><span data-i18n="gui.modal.name">Nom</span> <input id="ft-name" type="text"></label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <input id="ft-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <div class="modal-actions">
+      <button id="btn-feat-delete" class="btn btn-danger" data-i18n="gui.edit.delete">Supprimer…</button>
+      <span class="spacer"></span>
+      <button id="btn-cancel-feat" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
+      <button id="btn-save-feat" class="btn btn-primary" data-i18n="gui.edit.save">Enregistrer</button>
     </div>
   </div>
 </div>

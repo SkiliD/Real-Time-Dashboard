@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -157,6 +158,17 @@ _INT_BOUNDS = {
 _MAX_PATTERNS = 10
 _MAX_PATTERN_LEN = 200
 
+# A quantifier applied to a group that already contains a quantifier
+# (e.g. "(a+)+", "(a|b)*{2,}", "(x{2,3})+") is the classic catastrophic-backtracking
+# shape. Rejecting them at validation time keeps `gitwatch.parse_message` safe
+# without needing a regex timeout (not available on Windows).
+_NESTED_QUANT_RE = re.compile(r"\([^()]*[+*{][^()]*\)[+*{]")
+
+
+def _has_nested_quantifier(pattern: str) -> bool:
+    """Heuristic: True if the pattern looks like it can backtrack exponentially."""
+    return bool(_NESTED_QUANT_RE.search(pattern))
+
 
 def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) -> Config:
     """Validate + apply general settings from a dict (GUI settings tab).
@@ -194,7 +206,6 @@ def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) 
             raise ValueError("commit_patterns must be a non-empty list of regex strings")
         if len(patterns) > _MAX_PATTERNS:
             raise ValueError(f"commit_patterns: at most {_MAX_PATTERNS} patterns")
-        import re
         for p in patterns:
             if not isinstance(p, str) or len(p) > _MAX_PATTERN_LEN:
                 raise ValueError(f"each commit pattern must be a string of at most {_MAX_PATTERN_LEN} chars")
@@ -202,6 +213,11 @@ def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) 
                 re.compile(p)
             except re.error as e:
                 raise ValueError(f"invalid commit regex {p!r}: {e}")
+            if _has_nested_quantifier(p):
+                raise ValueError(
+                    f"commit pattern {p!r} is rejected: nested quantifiers can cause "
+                    "catastrophic backtracking (ReDoS)"
+                )
         cfg.commit_patterns = list(patterns)
 
     return cfg

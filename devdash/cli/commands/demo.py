@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import sys
+
 import typer
 from rich.console import Console
 
 from devdash.core import demo as demo_core
 from devdash.core import projects as core_projects
 from devdash.core.i18n import tr
-from ..deps import get_conn
+from ..deps import get_conn, guard
 from ..output import emit
 
 app = typer.Typer(help=tr("group.demo.help"))
@@ -34,7 +36,12 @@ def seed_cmd(
     existing = core_projects.list(conn, include_archived=True)
     if existing and not force:
         raise typer.BadParameter(tr("err.demo_exists", n=len(existing)))
-    summary = demo_core.seed(conn)
+    # --force alone is enough in non-interactive mode (--json / piped stdin);
+    # interactively, ask once so a stray --force can't wipe real data
+    interactive = not (ctx.obj and ctx.obj.get("json")) and sys.stdin.isatty()
+    if existing and force and interactive and not typer.confirm(tr("demo.force_confirm"), default=False):
+        raise typer.Abort()
+    summary = guard(demo_core.seed, conn)
 
     def render() -> None:
         console.print(tr("demo.seeded"))

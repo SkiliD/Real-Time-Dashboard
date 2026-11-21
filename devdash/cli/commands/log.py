@@ -52,9 +52,9 @@ def _render_log_table(entries) -> None:
 @app.command("recent", help=tr("log.recent.help"))
 def recent_cmd(
     ctx: typer.Context,
-    project: str | None = typer.Option(None, "--project", "-p"),
-    task: int | None = typer.Option(None, "--task", "-t"),
-    limit: int = typer.Option(50, "--limit", "-n"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+    task: int | None = typer.Option(None, "--task", "-t", help=tr("opt.task")),
+    limit: int = typer.Option(50, "--limit", "-n", help=tr("opt.limit")),
 ) -> None:
     """Most recent devlog entries (alias: list)."""
     conn = get_conn(ctx)
@@ -71,8 +71,8 @@ app.command("list")(recent_cmd)
 def search_cmd(
     ctx: typer.Context,
     text: str = typer.Argument(..., help=tr("opt.query")),
-    project: str | None = typer.Option(None, "--project", "-p"),
-    limit: int = typer.Option(100, "--limit", "-n"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+    limit: int = typer.Option(100, "--limit", "-n", help=tr("opt.limit")),
 ) -> None:
     """Search devlog entries (substring, case-insensitive)."""
     conn = get_conn(ctx)

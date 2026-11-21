@@ -48,6 +48,12 @@ def parse_tags(raw: str) -> list[str]:
         return []
 
 
+def escape_like(q: str) -> str:
+    """Escape LIKE wildcards in user input so a search matches literally.
+    Used with `LIKE ? ESCAPE '\\'` in tasks.list and logs.list."""
+    return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @dataclass
 class Project:
     id: int
@@ -193,7 +199,11 @@ class Event:
     @classmethod
     def from_row(cls, row) -> "Event":
         d = dict(row)
-        d["payload"] = json.loads(d.get("payload") or "{}")
+        try:
+            value = json.loads(d.get("payload") or "{}")
+            d["payload"] = value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            d["payload"] = {}  # corrupt payload (e.g. hand-edited import): never crash readers
         return cls(**d)
 
     def to_dict(self) -> dict:

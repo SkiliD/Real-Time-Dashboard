@@ -118,14 +118,15 @@ new Git commits, which a background watcher picks up every 20 seconds.
 
 | You want to… | Command |
 |---|---|
-| see projects / switch active | `devdash projects list` · `devdash projects set-active aether-vale` |
-| add / list / finish a task | `devdash task add "Dash" --tag gameplay --est 90` · `devdash task list` · `devdash task done 3` |
+| see projects / switch active | `devdash projects list` · `devdash projects set-active aether-vale` · `devdash projects show aether-vale` · `devdash projects update aether-vale --status beta` · `devdash projects archive aether-vale` · `devdash projects delete aether-vale` |
+| connect an existing folder | `devdash projects connect "C:\games\aether-vale"` (engine + git auto-detected) |
+| add / list / finish a task | `devdash task add "Dash" --tag gameplay --est 90` · `devdash task list` · `devdash task done 3` · `devdash task start 3` · `devdash task cancel 3` · `devdash task reopen 3` · `devdash task edit 3 --priority high` · `devdash task show 3` · `devdash task delete 3` |
 | filter tasks | `devdash task list --status todo --tag ui --feature dash` |
-| start / stop the timer | `devdash session start --task 3 --pomodoro` · `devdash session stop --note "…"` |
-| write in the devlog | `devdash log add "idea: chained air dash"` · `devdash log search "dash"` |
-| see Git activity | `devdash git status` · `devdash git log --task 3` · `devdash git sync` |
-| validate a feature (only you can) | `devdash feature add dash` · `devdash feature link dash 3 4` · `devdash feature done dash` |
-| see your stats | `devdash status` · `devdash stats week` · `devdash stats streak` |
+| start / stop the timer | `devdash session start --task 3 --pomodoro` · `devdash session stop --note "…"` · `devdash session now` · `devdash session list --week` |
+| write in the devlog | `devdash log add "idea: chained air dash"` · `devdash log search "dash"` · `devdash log recent` · `devdash log edit 2 --tags idea` · `devdash log delete 2` |
+| see Git activity | `devdash git status` · `devdash git log --task 3` · `devdash git sync` · `devdash git link <path>` · `devdash git unlink` · `devdash git ignore` |
+| manage features (only you validate) | `devdash feature add dash` · `devdash feature list` · `devdash feature show dash` · `devdash feature link dash 3 4` · `devdash feature unlink dash 3` · `devdash feature done dash` · `devdash feature approve dash` · `devdash feature reject dash` · `devdash feature edit dash --name air-dash` · `devdash feature delete dash` · `devdash feature reopen dash` |
+| see your stats | `devdash status` · `devdash stats today` · `devdash stats week` · `devdash stats month` · `devdash stats streak` · `devdash stats tags` · `devdash stats all` |
 | back up everything | `devdash backup --out D:\backups` (timestamped zip) |
 | export / re-import data | `devdash export --out export.json` · `devdash import export.json` |
 | AI help | `devdash ai ask "where do I stand?"` · `devdash ai plan "combat system" --apply` · `devdash ai verify 3` · `devdash ai context` |
@@ -231,7 +232,7 @@ all the work; the CLI (typer/rich) and the GUI (local HTTP server + native PyWeb
 window) are thin shells over the same core, which is why they always agree.
 
 ```bash
-PYTHONPATH=. python -m pytest -q    # 119 tests
+PYTHONPATH=. python -m pytest -q    # 228+ tests
 ```
 
 Optional extras: `pip install playwright && playwright install chromium` enables a

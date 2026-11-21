@@ -133,20 +133,20 @@ def link(conn: sqlite3.Connection, project_id: int, repo_path: str) -> str:
     p = Path(repo_path).expanduser().resolve()
     if not is_repo(p):
         raise GitError(f"not a git repository: {p}")
-    conn.execute(
-        "INSERT INTO git_links(project_id, repo_path, added_at) VALUES (?, ?, ?) "
-        "ON CONFLICT(project_id) DO UPDATE SET repo_path = excluded.repo_path",
-        (project_id, str(p), now_iso()),
-    )
-    conn.commit()
-    events.append(conn, "git", project_id, "linked", {"repo_path": str(p)})
+    with conn:
+        conn.execute(
+            "INSERT INTO git_links(project_id, repo_path, added_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(project_id) DO UPDATE SET repo_path = excluded.repo_path",
+            (project_id, str(p), now_iso()),
+        )
+        events.append(conn, "git", project_id, "linked", {"repo_path": str(p)}, commit=False)
     return str(p)
 
 
 def unlink(conn: sqlite3.Connection, project_id: int) -> None:
-    conn.execute("DELETE FROM git_links WHERE project_id = ?", (project_id,))
-    conn.commit()
-    events.append(conn, "git", project_id, "unlinked", {})
+    with conn:
+        conn.execute("DELETE FROM git_links WHERE project_id = ?", (project_id,))
+        events.append(conn, "git", project_id, "unlinked", {}, commit=False)
 
 
 def get_link(conn: sqlite3.Connection, project_id: int) -> str | None:
@@ -175,8 +175,12 @@ def parse_message(message: str, patterns: list[str]) -> tuple[int | None, str | 
     First matching pattern wins. A numeric capture group -> task id; otherwise
     the capture is treated as a feature name.
     """
+    from .config import _has_nested_quantifier  # local import: avoid a cycle at module load
     haystack = message[:MAX_PARSE_INPUT_CHARS]
     for pattern in patterns:
+        if _has_nested_quantifier(pattern):
+            # hand-edited config.json bypassed validation: refuse rather than hang
+            raise GitError(f"commit pattern {pattern!r} rejected: nested quantifiers (ReDoS risk)")
         try:
             m = re.search(pattern, haystack, re.IGNORECASE)
         except re.error as e:

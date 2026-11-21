@@ -53,30 +53,34 @@ def create(
     color: str = "#8a8f98",
     status: str = "idea",
 ) -> Project:
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("project name is required (non-empty)")
+    name = name.strip()
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
+    if not isinstance(engine, str) or not engine.strip() or len(engine) > 40:
+        raise ValueError("engine must be a non-empty string of at most 40 characters")
     color = _validate_color(color)
     now = now_iso()
     slug = _unique_slug(conn, _slugify(name))
-    try:
-        cur = conn.execute(
-            "INSERT INTO projects(slug, name, description, engine, color, status, "
-            "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
-            (slug, name, description, engine.lower(), color, status, now, now),
-        )
-    except sqlite3.IntegrityError:
-        # concurrent create grabbed the same slug between check and insert
-        conn.rollback()
-        slug = _unique_slug(conn, _slugify(name))
-        cur = conn.execute(
-            "INSERT INTO projects(slug, name, description, engine, color, status, "
-            "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
-            (slug, name, description, engine.lower(), color, status, now, now),
-        )
-    conn.commit()
-    project = get(conn, cur.lastrowid)
-    assert project is not None
-    events.append(conn, "project", project.id, "created", project.to_dict())
+    for _attempt in range(5):  # bounded retry on a slug race
+        try:
+            with conn:  # row + event in one transaction
+                cur = conn.execute(
+                    "INSERT INTO projects(slug, name, description, engine, color, status, "
+                    "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    (slug, name, description, engine.lower(), color, status, now, now),
+                )
+                project = get(conn, cur.lastrowid)
+                assert project is not None
+                events.append(conn, "project", project.id, "created", project.to_dict(), commit=False)
+            break
+        except sqlite3.IntegrityError:
+            # concurrent create grabbed the same slug between check and insert
+            conn.rollback()
+            slug = _unique_slug(conn, _slugify(name))
+    else:
+        raise ValueError(f"could not allocate a unique slug for {name!r}")
     return project
 
 
@@ -106,13 +110,13 @@ def set_active(conn: sqlite3.Connection, ref: int | str) -> Project:
     project = get(conn, ref)
     if project is None:
         raise KeyError(f"no project matching {ref!r}")
-    conn.execute(
-        "INSERT INTO meta(key, value) VALUES ('active_project_id', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (str(project.id),),
-    )
-    conn.commit()
-    events.append(conn, "project", project.id, "activated", {"slug": project.slug})
+    with conn:
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES ('active_project_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(project.id),),
+        )
+        events.append(conn, "project", project.id, "activated", {"slug": project.slug}, commit=False)
     return project
 
 
@@ -146,11 +150,13 @@ def update(
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
     if color is not None:
         color = _validate_color(color)
-    if engine is not None and (not isinstance(engine, str) or len(engine) > 40):
-        raise ValueError("engine must be a string of at most 40 characters")
+    if engine is not None and (not isinstance(engine, str) or not engine.strip() or len(engine) > 40):
+        raise ValueError("engine must be a non-empty string of at most 40 characters")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValueError("project name cannot be empty")
     fields, values = [], []
     for column, value in (
-        ("name", name),
+        ("name", name.strip() if isinstance(name, str) else name),
         ("description", description),
         ("engine", engine.lower() if engine else None),
         ("color", color),
@@ -169,10 +175,10 @@ def update(
             f"UPDATE projects SET {', '.join(fields)} WHERE id = ?", values
         )
         conn.commit()
-    project = get(conn, project.id)
-    assert project is not None
-    events.append(conn, "project", project.id, "updated", project.to_dict())
-    return project
+        project = get(conn, project.id)
+        assert project is not None
+        events.append(conn, "project", project.id, "updated", project.to_dict())
+    return project  # no field changed: no write, no event
 
 
 def delete(conn: sqlite3.Connection, ref: int | str) -> Project:
@@ -182,8 +188,8 @@ def delete(conn: sqlite3.Connection, ref: int | str) -> Project:
     devlog entries and the git LINK go with the project row. Imported git
     commits and sync state are deliberately KEPT (no FK by design): they are
     the repo's history, keyed by repo_path, and may still be useful.
-    If the deleted project was the active one, the active pointer is cleared
-    (focus moves to none until the user picks another project).
+    If the deleted project was the active one, the active pointer moves to the
+    first remaining project (or none when no project is left).
     Explicit human action only — never called automatically.
     """
     project = get(conn, ref)

@@ -82,7 +82,8 @@ TOOLS = [
           {"note": {"type": "string"}}),
     _tool("devdash_log_add", "Add a devlog entry (decision, blocker, idea).",
           {"content": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}, ["content"]),
-    _tool("devdash_log_search", "Search devlog entries.", {"query": {"type": "string"}}, ["query"]),
+    _tool("devdash_log_search", "Search devlog entries.",
+          {"query": {"type": "string"}, "limit": {"type": "integer"}}, ["query"]),
     _tool("devdash_stats", "Stats for a period.", {"period": {"type": "string", "enum": ["today", "week", "month", "streak"]}}, ["period"]),
     _tool("devdash_git_status", "Git snapshot of the active project (branch, last commit, commits today)."),
     _tool("devdash_git_log", "Recent commits of the linked repo, optionally filtered by task.",
@@ -110,118 +111,119 @@ def _conn(home: Path | None):
 def _call(name: str, args: dict, home: Path | None) -> dict:
     """Execute one tool. Returns a plain dict (JSON-serialized by the caller)."""
     conn = _conn(home)
-    try:
-        if name == "devdash_status":
-            return status_mod.snapshot(conn)
-        if name == "devdash_projects_list":
-            active = projects.get_active(conn)
-            return {"active": active.slug if active else None,
-                    "projects": [p.to_dict() for p in projects.list(conn, include_archived=True)]}
-        if name == "devdash_tasks_list":
-            proj = projects.get_active(conn)
-            pid = proj.id if proj else None
-            if args.get("project"):
-                p = projects.get(conn, args["project"])
-                if p is None:
-                    raise KeyError(f"no project {args['project']!r}")
-                pid = p.id
-            fid = None
-            if args.get("feature"):
-                f = features.get(conn, args["feature"], pid)
-                if f is None:
-                    raise KeyError(f"no feature {args['feature']!r}")
-                fid = f.id
-            rows = tsk.list(conn, project_id=pid,
-                            status=[args["status"]] if args.get("status") else None,
-                            tag=args.get("tag"), feature_id=fid)
-            return {"count": len(rows), "tasks": [t.to_dict() for t in rows]}
-        if name == "devdash_task_add":
-            proj = projects.get_active(conn)
-            if args.get("project"):
-                proj = projects.get(conn, args["project"]) or proj
-            if proj is None:
-                raise KeyError("no active project")
-            est = args.get("estimate_min")
-            if est is not None:
-                est = int(est)  # ValueError on garbage -> clean isError
-                if est < 0:
-                    raise ValueError("estimate_min must be >= 0")
-            t = tsk.add(conn, proj.id, args["title"],
-                        priority=args.get("priority", "medium"),
-                        estimate_min=est,
-                        tags=args.get("tags") or [])
-            return t.to_dict()
-        if name == "devdash_task_set_status":
-            return tsk.set_status(conn, int(args["id"]), args["status"]).to_dict()
-        if name == "devdash_session_start":
-            proj = projects.get_active(conn)
-            if args.get("project"):
-                proj = projects.get(conn, args["project"]) or proj
-            if proj is None:
-                raise KeyError("no active project")
-            s = sessions.start(conn, proj.id, task_id=args.get("task_id"),
-                               kind=args.get("kind", "focus"), minutes=args.get("minutes"))
-            return s.to_dict()
-        if name == "devdash_session_stop":
-            return sessions.stop(conn, None, note=args.get("note", "")).to_dict()
-        if name == "devdash_log_add":
-            proj = projects.get_active(conn)
-            e = logs.add(conn, args["content"], project_id=proj.id if proj else None,
-                         tags=args.get("tags") or [])
-            return e.to_dict()
-        if name == "devdash_log_search":
-            rows = logs.search(conn, args["query"],
-                               limit=_int_arg(args, "limit", 20, 1, MAX_SEARCH_LIMIT))
-            return {"count": len(rows), "entries": [x.to_dict() for x in rows]}
-        if name == "devdash_stats":
-            proj = projects.get_active(conn)
-            pid = proj.id if proj else None
-            period = args.get("period", "today")
-            if period == "today":
-                return {"today_minutes": stats.today_minutes(conn, pid),
-                        "tasks_done_today": stats.tasks_done_today(conn, pid),
-                        "streak_days": stats.streak_days(conn, pid)}
-            if period == "week":
-                return {"minutes_week": stats.period_minutes(conn, pid, 7),
-                        "per_day": stats.time_by_day(conn, pid, 7), "streak_days": stats.streak_days(conn, pid)}
-            if period == "month":
-                return {"minutes_month": stats.period_minutes(conn, pid, 30)}
-            if period == "streak":
-                return {"streak_days": stats.streak_days(conn, pid)}
-            raise ValueError(f"unknown period {period!r}")
-        if name == "devdash_git_status":
-            proj = projects.get_active(conn)
-            if proj is None:
-                raise KeyError("no active project")
-            return gitwatch.status(conn, proj.id)
-        if name == "devdash_git_log":
-            proj = projects.get_active(conn)
-            task_id = args.get("task_id")
-            rows = gitwatch.commits(conn, project_id=proj.id if proj else None,
-                                    task_id=int(task_id) if task_id is not None else None,
-                                    limit=_int_arg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT))
-            return {"count": len(rows), "commits": [c.to_dict() for c in rows]}
-        if name == "devdash_features_list":
-            proj = projects.get_active(conn)
-            return {"features": features.list(conn, project_id=proj.id if proj else None)}
-        if name == "devdash_ai_ask":
-            from .core.ai import assistant
-            from .core.ai.provider import AIDisabledError, AIError
-            try:
-                return assistant.ask(conn, args["question"], home=home)
-            except (AIDisabledError, AIError) as e:
-                raise AIError(str(e)) from e
-        if name == "devdash_task_verify":
-            from .core.ai import assistant
-            from .core.ai.provider import AIDisabledError, AIError
-            try:
-                # read-only on purpose: an agent NEVER marks a task done by itself
-                return assistant.task_verdict(conn, int(args["id"]), apply=False, home=home)
-            except (AIDisabledError, AIError) as e:
-                raise AIError(str(e)) from e
-        raise KeyError(f"unknown tool {name!r}")
-    finally:
-        pass  # cached process-wide connection: do NOT close between calls
+    if name == "devdash_status":
+        return status_mod.snapshot(conn)
+    if name == "devdash_projects_list":
+        active = projects.get_active(conn)
+        return {"active": active.slug if active else None,
+                "projects": [p.to_dict() for p in projects.list(conn, include_archived=True)]}
+    if name == "devdash_tasks_list":
+        proj = projects.get_active(conn)
+        pid = proj.id if proj else None
+        if args.get("project"):
+            p = projects.get(conn, args["project"])
+            if p is None:
+                raise KeyError(f"no project {args['project']!r}")
+            pid = p.id
+        fid = None
+        if args.get("feature"):
+            f = features.get(conn, args["feature"], pid)
+            if f is None:
+                raise KeyError(f"no feature {args['feature']!r}")
+            fid = f.id
+        rows = tsk.list(conn, project_id=pid,
+                        status=[args["status"]] if args.get("status") else None,
+                        tag=args.get("tag"), feature_id=fid)
+        return {"count": len(rows), "tasks": [t.to_dict() for t in rows]}
+    if name == "devdash_task_add":
+        proj = projects.get_active(conn)
+        if args.get("project"):
+            proj = projects.get(conn, args["project"]) or proj
+        if proj is None:
+            raise KeyError("no active project")
+        est = args.get("estimate_min")
+        if est is not None:
+            est = int(est)  # ValueError on garbage -> clean isError
+            if est < 0:
+                raise ValueError("estimate_min must be >= 0")
+        t = tsk.add(conn, proj.id, args["title"],
+                    priority=args.get("priority", "medium"),
+                    estimate_min=est,
+                    tags=args.get("tags") or [])
+        return t.to_dict()
+    if name == "devdash_task_set_status":
+        return tsk.set_status(conn, int(args["id"]), args["status"]).to_dict()
+    if name == "devdash_session_start":
+        proj = projects.get_active(conn)
+        if args.get("project"):
+            proj = projects.get(conn, args["project"]) or proj
+        if proj is None:
+            raise KeyError("no active project")
+        minutes = args.get("minutes")
+        if minutes is not None:
+            minutes = max(1, min(24 * 60, int(minutes)))  # bound: 1 min .. 24 h
+        s = sessions.start(conn, proj.id, task_id=args.get("task_id"),
+                           kind=args.get("kind", "focus"), minutes=minutes)
+        return s.to_dict()
+    if name == "devdash_session_stop":
+        return sessions.stop(conn, None, note=args.get("note", "")).to_dict()
+    if name == "devdash_log_add":
+        proj = projects.get_active(conn)
+        e = logs.add(conn, args["content"], project_id=proj.id if proj else None,
+                     tags=args.get("tags") or [])
+        return e.to_dict()
+    if name == "devdash_log_search":
+        rows = logs.search(conn, args["query"],
+                           limit=_int_arg(args, "limit", 20, 1, MAX_SEARCH_LIMIT))
+        return {"count": len(rows), "entries": [x.to_dict() for x in rows]}
+    if name == "devdash_stats":
+        proj = projects.get_active(conn)
+        pid = proj.id if proj else None
+        period = args.get("period", "today")
+        if period == "today":
+            return {"today_minutes": stats.today_minutes(conn, pid),
+                    "tasks_done_today": stats.tasks_done_today(conn, pid),
+                    "streak_days": stats.streak_days(conn, pid)}
+        if period == "week":
+            return {"minutes_week": stats.period_minutes(conn, pid, 7),
+                    "per_day": stats.time_by_day(conn, pid, 7), "streak_days": stats.streak_days(conn, pid)}
+        if period == "month":
+            return {"minutes_month": stats.period_minutes(conn, pid, 30)}
+        if period == "streak":
+            return {"streak_days": stats.streak_days(conn, pid)}
+        raise ValueError(f"unknown period {period!r}")
+    if name == "devdash_git_status":
+        proj = projects.get_active(conn)
+        if proj is None:
+            raise KeyError("no active project")
+        return gitwatch.status(conn, proj.id)
+    if name == "devdash_git_log":
+        proj = projects.get_active(conn)
+        task_id = args.get("task_id")
+        rows = gitwatch.commits(conn, project_id=proj.id if proj else None,
+                                task_id=int(task_id) if task_id is not None else None,
+                                limit=_int_arg(args, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT))
+        return {"count": len(rows), "commits": [c.to_dict() for c in rows]}
+    if name == "devdash_features_list":
+        proj = projects.get_active(conn)
+        return {"features": features.list(conn, project_id=proj.id if proj else None)}
+    if name == "devdash_ai_ask":
+        from .core.ai import assistant
+        from .core.ai.provider import AIDisabledError, AIError
+        try:
+            return assistant.ask(conn, args["question"], home=home)
+        except (AIDisabledError, AIError) as e:
+            raise AIError(str(e)) from e
+    if name == "devdash_task_verify":
+        from .core.ai import assistant
+        from .core.ai.provider import AIDisabledError, AIError
+        try:
+            # read-only on purpose: an agent NEVER marks a task done by itself
+            return assistant.task_verdict(conn, int(args["id"]), apply=False, home=home)
+        except (AIDisabledError, AIError) as e:
+            raise AIError(str(e)) from e
+    raise KeyError(f"unknown tool {name!r}")
+    # note: `conn` is cached process-wide on purpose and NOT closed between calls
 
 
 def handle_request(req, home: Path | None) -> dict | None:

@@ -10,7 +10,7 @@ import json
 import sqlite3
 
 from . import events, projects
-from .models import Task, now_iso
+from .models import Task, escape_like, now_iso
 
 VALID_PRIORITIES = ("critical", "high", "medium", "low")
 VALID_STATUSES = ("todo", "in_progress", "done", "cancelled")
@@ -35,36 +35,55 @@ def add(
     feature_id: int | None = None,
     status: str = "todo",
 ) -> Task:
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("task title is required (non-empty)")
+    title = title.strip()
     if priority not in VALID_PRIORITIES:
         raise ValueError(f"invalid priority {priority!r}, expected one of {VALID_PRIORITIES}")
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
+    if estimate_min is not None and (isinstance(estimate_min, bool) or not isinstance(estimate_min, int) or estimate_min < 0):
+        raise ValueError("estimate_min must be a positive integer or None")
     if projects.get(conn, project_id) is None:
         raise KeyError(f"no project with id {project_id}")
+    # a provisional task for _check_parent (only id/project_id matter there)
+    if parent_id is not None or feature_id is not None:
+        probe = Task(id=0, project_id=project_id, parent_id=None, title=title,
+                     description="", priority=priority, estimate_min=None,
+                     status=status, tags=[], feature_id=None)
+        if parent_id is not None:
+            _check_parent(conn, probe, parent_id)
+        if feature_id is not None:
+            from . import features as _feats
+            f = _feats.get(conn, feature_id)
+            if f is None:
+                raise KeyError(f"no feature #{feature_id}")
+            if f.project_id != project_id:
+                raise ValueError(f"feature #{feature_id} belongs to another project")
     now = now_iso()
-    cur = conn.execute(
-        "INSERT INTO tasks(project_id, parent_id, title, description, priority, "
-        "estimate_min, status, tags, feature_id, order_index, created_at, updated_at, "
-        "completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-        (
-            project_id,
-            parent_id,
-            title,
-            description,
-            priority,
-            estimate_min,
-            status,
-            json.dumps([str(t) for t in tags]),
-            feature_id,
-            now,
-            now,
-            now if status == "done" else None,
-        ),
-    )
-    conn.commit()
-    task = get(conn, cur.lastrowid)
-    assert task is not None
-    events.append(conn, "task", task.id, "created", task.to_dict())
+    with conn:  # one transaction: row + event (a crash can't leave one without the other)
+        cur = conn.execute(
+            "INSERT INTO tasks(project_id, parent_id, title, description, priority, "
+            "estimate_min, status, tags, feature_id, order_index, created_at, updated_at, "
+            "completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+            (
+                project_id,
+                parent_id,
+                title,
+                description,
+                priority,
+                estimate_min,
+                status,
+                json.dumps([str(t) for t in tags]),
+                feature_id,
+                now,
+                now,
+                now if status == "done" else None,
+            ),
+        )
+        task = get(conn, cur.lastrowid)
+        assert task is not None
+        events.append(conn, "task", task.id, "created", task.to_dict(), commit=False)
     return task
 
 
@@ -112,8 +131,7 @@ def list(
         clauses.append("feature_id = ?")
         values.append(feature_id)
     if q:
-        # escape LIKE wildcards in user input (same scheme as logs.list)
-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        escaped = escape_like(q)
         clauses.append("(title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')")
         values.extend([f"%{escaped}%", f"%{escaped}%"])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -150,14 +168,14 @@ def set_status(conn: sqlite3.Connection, task_id: int, status: str) -> Task:
     if task is None:
         raise KeyError(f"no task with id {task_id}")
     now = now_iso()
-    conn.execute(
-        "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
-        (status, now if status == "done" else None, now, task_id),
-    )
-    conn.commit()
-    task = get(conn, task_id)
-    assert task is not None
-    events.append(conn, "task", task.id, f"status:{status}", task.to_dict())
+    with conn:  # row + event in one transaction
+        conn.execute(
+            "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?",
+            (status, now if status == "done" else None, now, task_id),
+        )
+        task = get(conn, task_id)
+        assert task is not None
+        events.append(conn, "task", task.id, f"status:{status}", task.to_dict(), commit=False)
     return task
 
 
@@ -168,13 +186,20 @@ def start(conn: sqlite3.Connection, task_id: int) -> Task:
     if task is None:
         raise KeyError(f"no task with id {task_id}")
     now = now_iso()
-    conn.execute(
-        "UPDATE tasks SET status = 'todo', updated_at = ? "
-        "WHERE project_id = ? AND status = 'in_progress' AND id != ?",
-        (now, task.project_id, task_id),
-    )
-    conn.commit()
-    return set_status(conn, task_id, "in_progress")
+    with conn:  # demote others + promote this one in ONE transaction (solo-focus rule)
+        conn.execute(
+            "UPDATE tasks SET status = 'todo', updated_at = ? "
+            "WHERE project_id = ? AND status = 'in_progress' AND id != ?",
+            (now, task.project_id, task_id),
+        )
+        conn.execute(
+            "UPDATE tasks SET status = 'in_progress', completed_at = NULL, updated_at = ? WHERE id = ?",
+            (now, task_id),
+        )
+        task = get(conn, task_id)
+        assert task is not None
+        events.append(conn, "task", task.id, "status:in_progress", task.to_dict(), commit=False)
+    return task
 
 
 def done(conn: sqlite3.Connection, task_id: int) -> Task:
@@ -250,11 +275,11 @@ def update(
         fields.append("updated_at = ?")
         values.append(now_iso())
         values.append(task_id)
-        conn.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", values)
-        conn.commit()
-        task = get(conn, task_id)
-        assert task is not None
-        events.append(conn, "task", task.id, "updated", task.to_dict())
+        with conn:  # row + event in one transaction
+            conn.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", values)
+            task = get(conn, task_id)
+            assert task is not None
+            events.append(conn, "task", task.id, "updated", task.to_dict(), commit=False)
     return task
 
 

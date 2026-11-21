@@ -60,19 +60,20 @@ def list_projects(
 def create_project(
     ctx: typer.Context,
     name: str = typer.Argument(..., help=tr("opt.name")),
-    description: str = typer.Option("", "--description", "-d"),
+    description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
     engine: str = typer.Option("other", "--engine", "-e",
                                 help=tr("opt.engine", list=", ".join(_ENGINES))),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
-    status: str = typer.Option("idea", "--status", "-s", help=tr("opt.status", list=", ".join(_STATUSES))),
+    status: str = typer.Option("idea", "--status", "-s",
+                                help=tr("opt.status", list=", ".join(_STATUSES))),
     set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
 ) -> None:
     """Create a new project."""
     conn = get_conn(ctx)
-    project = core.create(conn, name, description=description, engine=engine,
-                          color=color, status=status)
+    project = guard(core.create, conn, name, description=description, engine=engine,
+                    color=color, status=status)
     if set_active:
-        core.set_active(conn, project.id)
+        guard(core.set_active, conn, project.id)
     emit(ctx, project.to_dict(), lambda: console.print(
         tr("projects.created", slug=project.slug, engine=project.engine, status=project.status)
         + (tr("projects.created.active_suffix") if set_active else "")
@@ -84,11 +85,12 @@ def connect_project(
     ctx: typer.Context,
     path: str = typer.Argument(..., help=tr("opt.path_folder")),
     name: str = typer.Option("", "--name", "-n", help=tr("opt.name")),
-    description: str = typer.Option("", "--description", "-d"),
+    description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
     engine: str = typer.Option("", "--engine", "-e",
-                                help=tr("opt.engine", list=", ".join(_ENGINES)) + " (défaut: auto-détecté)"),
+                                help=tr("opt.engine", list=", ".join(_ENGINES)) + " " + tr("opt.engine_auto")),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
-    status: str = typer.Option("idea", "--status", "-s", help=tr("opt.status", list=", ".join(_STATUSES))),
+    status: str = typer.Option("idea", "--status", "-s",
+                                help=tr("opt.status", list=", ".join(_STATUSES))),
     set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
     no_git: bool = typer.Option(False, "--no-git", help=tr("opt.no_git")),
 ) -> None:
@@ -107,7 +109,7 @@ def connect_project(
     project = guard(core.create, conn, name or info["name"] or info["path"],
                     description=description, engine=eng, color=color, status=status)
     if set_active:
-        core.set_active(conn, project.id)
+        guard(core.set_active, conn, project.id)
     git_root = None
     if not no_git and info["git_root"]:
         git_root = guard(gitwatch.link, conn, project.id, info["git_root"])
@@ -165,16 +167,17 @@ def show_project(
 def update_project(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_project")),
-    name: str | None = typer.Option(None, "--name"),
-    description: str | None = typer.Option(None, "--description", "-d"),
-    engine: str | None = typer.Option(None, "--engine", "-e"),
-    color: str | None = typer.Option(None, "--color", "-c"),
-    status: str | None = typer.Option(None, "--status", "-s"),
+    name: str | None = typer.Option(None, "--name", help=tr("opt.name")),
+    description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
+    engine: str | None = typer.Option(None, "--engine", "-e", help=tr("opt.engine", list=", ".join(_ENGINES))),
+    color: str | None = typer.Option(None, "--color", "-c", help=tr("opt.color")),
+    status: str | None = typer.Option(None, "--status", "-s",
+                                       help=tr("opt.status", list=", ".join(_STATUSES))),
 ) -> None:
     """Update project fields (e.g. --status beta)."""
     conn = get_conn(ctx)
-    project = core.update(conn, int(ref) if ref.isdigit() else ref, name=name,
-                          description=description, engine=engine, color=color, status=status)
+    project = guard(core.update, conn, int(ref) if ref.isdigit() else ref, name=name,
+                    description=description, engine=engine, color=color, status=status)
     emit(ctx, project.to_dict(), lambda: console.print(
         tr("projects.updated", slug=project.slug, status=project.status)
     ))
@@ -184,12 +187,12 @@ def update_project(
 def archive_project(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_project")),
-    unarchive: bool = typer.Option(False, "--unarchive"),
+    unarchive: bool = typer.Option(False, "--unarchive", help=tr("opt.unarchive")),
 ) -> None:
     """Soft-archive a project (hidden from list, data kept; never deleted)."""
     conn = get_conn(ctx)
-    project = core.update(conn, int(ref) if ref.isdigit() else ref,
-                          archived=False if unarchive else True)
+    project = guard(core.update, conn, int(ref) if ref.isdigit() else ref,
+                    archived=False if unarchive else True)
     state = tr("state.restored") if unarchive else tr("state.archived")
     emit(ctx, project.to_dict(), lambda: console.print(
         tr("projects.archived", slug=project.slug, state=state)

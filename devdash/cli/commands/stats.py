@@ -35,7 +35,7 @@ def _minutes_block(conn, pid, days: int) -> dict:
 
 
 @app.command("today", help=tr("stats.today.help"))
-def today_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
+def today_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Today: minutes worked, tasks done, current session, streak."""
     conn, pid = _pid(ctx, project)
     # local-day boundary, same as the GUI/status (not a raw UTC date slice)
@@ -55,7 +55,7 @@ def today_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--pr
 
 
 @app.command("week", help=tr("stats.week.help"))
-def week_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
+def week_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Last 7 days: minutes and tasks done per day + totals."""
     conn, pid = _pid(ctx, project)
     time7 = stats.time_by_day(conn, pid, 7)
@@ -79,7 +79,7 @@ def week_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--pro
 
 
 @app.command("month", help=tr("stats.month.help"))
-def month_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
+def month_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Last 30 days totals."""
     conn, pid = _pid(ctx, project)
     data = {**_minutes_block(conn, pid, 30), "period_days": 30}
@@ -90,7 +90,7 @@ def month_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--pr
 
 
 @app.command("streak", help=tr("stats.streak.help"))
-def streak_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
+def streak_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Consecutive days with at least one finished work session."""
     conn, pid = _pid(ctx, project)
     data = {"streak_days": stats.streak_days(conn, pid), "project": pid}
@@ -100,7 +100,7 @@ def streak_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--p
 
 
 @app.command("tags", help=tr("stats.tags.help"))
-def tags_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
+def tags_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Distribution per tag: task count and minutes worked."""
     conn, pid = _pid(ctx, project)
     rows = stats.by_tag(conn, pid)
@@ -118,7 +118,7 @@ def tags_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--pro
 
 
 @app.command("all", help=tr("stats.all.help"))
-def all_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p")) -> None:
+def all_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Everything: today, week, month, streak, tags, progress."""
     conn, pid = _pid(ctx, project)
     data = {

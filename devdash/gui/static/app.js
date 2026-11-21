@@ -18,7 +18,7 @@ const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(async (r) => {
-      const d = await r.json();
+      const d = await r.json().catch(() => ({})); // non-JSON body: keep the real status text
       if (!r.ok) throw new Error(d.error || r.statusText);
       return d;
     }),
@@ -28,6 +28,7 @@ const state = {
   projects: [],
   active: null, // slug
   tasks: [],
+  allTags: [], // unfiltered tag list for the filter select (H1: was rebuilt from filtered tasks)
   session: null,
   logs: [],
   logQuery: "",
@@ -36,6 +37,7 @@ const state = {
   filterPrio: "",
   gitTaskFilter: "",
   editingTaskId: null,
+  editingFeatId: null, // feature currently open in the edit modal
   featOpen: null, // feature name currently expanded
   lastEventId: 0,
   tab: "tasks",
@@ -89,10 +91,10 @@ async function realLoadAll() {
     ? [loadAiConfig(), loadSettings(), loadUpdateStatus()]
     : [];
   await Promise.all([
-    loadTasks(), loadSession(), loadSessions(), loadLogs(), loadGit(),
+    loadTasks(), loadTags(), loadSession(), loadSessions(), loadLogs(), loadGit(),
     loadFeatures(), loadAiStatus(), loadStats(), ...settingsLoads,
+    api.get("/api/status").then((s) => { state.status = s; }),
   ]);
-  state.status = await api.get("/api/status");
   render();
 }
 
@@ -102,6 +104,14 @@ async function loadTasks() {
   if (state.filterPrio) q.set("priority", state.filterPrio);
   if (state.taskQuery) q.set("q", state.taskQuery);
   state.tasks = (await api.get("/api/tasks?" + q.toString())).tasks;
+}
+
+async function loadTags() {
+  // unfiltered list: the filter select must keep showing every tag even while
+  // one is selected (otherwise you can never switch to another tag directly)
+  const q = new URLSearchParams();
+  if (state.statsFilters.project) q.set("project", state.statsFilters.project);
+  state.allTags = (await api.get("/api/tags?" + q.toString())).tags;
 }
 
 async function loadSession() {
@@ -126,9 +136,11 @@ async function loadGit() {
     if (state.gitUnparsed) q.set("unparsed", "1");
     if (state.gitTaskFilter) q.set("task", state.gitTaskFilter);
     state.gitCommits = (await api.get("/api/git/commits?" + q.toString())).commits;
-  } catch {
+    state.gitError = null;
+  } catch (e) {
     state.gitStatus = { linked: false };
     state.gitCommits = [];
+    state.gitError = e.message; // show the real error, not a fake "no repo linked"
   }
 }
 
@@ -160,7 +172,7 @@ function renderStatsFilters() {
   sel.innerHTML =
     `<option value="">${T("gui.stats.project_active")}</option>` +
     state.projects.filter((p) => !p.archived).map((p) =>
-      `<option value="${p.slug}">${escapeHtml(p.name)}</option>`).join("") +
+      `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join("") +
     `<option value="all">${T("gui.stats.all_projects")}</option>`;
   sel.value = f.project;
   const days = $("#stats-days");
@@ -310,7 +322,16 @@ function readGeneralForm() {
 }
 
 async function saveAllSettings() {
-  const body = { ...readGeneralForm(), ...readAiForm() };
+  const gen = readGeneralForm();
+  const ai = readAiForm();
+  // a cleared number field parses to NaN: refuse it loudly instead of silently
+  // sending null (= "no change") and letting the user believe it was saved as 0
+  for (const [key, sel] of [["pomodoro_focus_min", "#cfg-pomo-focus"], ["pomodoro_break_min", "#cfg-pomo-break"],
+                            ["git_watch_interval_sec", "#cfg-git-watch"], ["gui_port", "#cfg-port"]]) {
+    if (Number.isNaN(gen[key])) { showError(T("gui.err.invalid_number", { field: sel })); return; }
+  }
+  if (Number.isNaN(ai.ai_context_max_chars)) { showError(T("gui.err.invalid_number", { field: "#cfg-context-max" })); return; }
+  const body = { ...gen, ...ai };
   const r = await api.post("/api/settings", body);
   state.settings = r.settings;
   state.aiCfg = r.settings.ai;
@@ -429,19 +450,31 @@ async function testAiConfig() {
 
 /* ---------- rendering ---------- */
 
+/* Render each panel only when its input signature changed: the 1.5 s poll must
+ * not rebuild the whole DOM (it stole keyboard focus, closed open <select>s and
+ * interrupted an in-progress kanban drag). */
+const _panelSig = {};
+function renderPanel(name, data, fn) {
+  const sig = JSON.stringify(data);
+  if (_panelSig[name] === sig) return;
+  _panelSig[name] = sig;
+  fn();
+}
+
 function render() {
-  renderProjects();
-  renderHeader();
-  renderKanban();
-  renderTagFilter();
-  renderSessionPanel();
-  renderSessions();
-  renderLogs();
-  renderGit();
-  renderFeatures();
-  renderChat();
-  renderStats();
-  saveUi(); // persist tab + filters so a reload restores the same view
+  renderPanel("projects", [state.projects, state.active], renderProjects);
+  renderPanel("header", [state.projects, state.active, state.tasks, state.status], renderHeader);
+  renderPanel("kanban", [state.tasks, state.features], renderKanban);
+  renderPanel("tagfilter", [state.allTags, state.filterTag], renderTagFilter);
+  renderPanel("session", [state.session, state.tasks], renderSessionPanel);
+  renderPanel("sessions", state.sessions, renderSessions);
+  renderPanel("logs", [state.logs, state.logQuery], renderLogs);
+  renderPanel("git", [state.gitStatus, state.gitCommits, state.gitUnparsed, state.gitTaskFilter], renderGit);
+  renderPanel("features", state.features, renderFeatures);
+  renderPanel("chat", [state.chat, state.ai], renderChat);
+  renderPanel("stats", [state.stats, state.statsFilters], renderStats);
+  renderPanel("ui", [state.tab, state.filterTag, state.filterPrio, state.taskQuery, state.logQuery,
+                     state.gitTaskFilter, state.gitUnparsed, state.statsFilters], saveUi);
 }
 
 // project colors end up in a style attribute: only accept #rrggbb (the API
@@ -503,8 +536,10 @@ function renderHeader() {
 }
 
 function renderKanban() {
-  for (const status of ["todo", "in_progress", "done"]) {
+  const statuses = ["todo", "in_progress", "done", "cancelled"]; // cancelled get their own column (reopenable)
+  for (const status of statuses) {
     const col = $("#col-" + status);
+    if (!col) continue;
     const list = state.tasks.filter((t) => t.status === status);
     $("#count-" + status).textContent = list.length;
     col.innerHTML = "";
@@ -516,9 +551,8 @@ function renderKanban() {
   badge.textContent = openCount;
   badge.title = T("gui.badge.open", { n: openCount });
   badge.classList.toggle("hidden", openCount === 0);
-  // guided empty state when no card is rendered (cancelled tasks render nowhere)
-  const rendered = ["todo", "in_progress", "done"]
-    .reduce((n, st) => n + $("#col-" + st).children.length, 0);
+  // empty state only when no card is rendered at all
+  const rendered = statuses.reduce((n, st) => n + ($("#col-" + st) ? $("#col-" + st).children.length : 0), 0);
   $("#tasks-empty").classList.toggle("hidden", rendered > 0);
 }
 
@@ -527,6 +561,12 @@ function taskCard(t) {
   card.className = "card " + t.status;
   card.draggable = true; // drag & drop between kanban columns
   card.dataset.taskId = t.id;
+  card.tabIndex = 0; // keyboard: Enter/Space opens the edit modal
+  card.setAttribute("role", "button");
+  card.setAttribute("aria-label", `#${t.id} ${t.title}`);
+  card.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTaskModal(t); }
+  });
   const tags = t.tags.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("");
   const est = t.estimate_min ? `<span class="est">${T("gui.est", { n: t.estimate_min })}</span>` : "";
   const subs = state.tasks.filter((x) => x.parent_id === t.id);
@@ -542,6 +582,7 @@ function taskCard(t) {
     actions.push(`<button class="btn btn-sm" data-act="todo">${T("gui.task.todo")}</button>`);
   }
   if (t.status === "done") actions.push(`<button class="btn btn-sm" data-act="todo">${T("gui.task.reopen")}</button>`);
+  if (t.status === "cancelled") actions.push(`<button class="btn btn-sm" data-act="todo">${T("gui.task.reopen")}</button>`);
   if (t.status !== "cancelled" && t.status !== "done") actions.push(`<button class="btn btn-sm" data-act="cancelled">${T("gui.task.cancel")}</button>`);
   card.innerHTML =
     `<div class="title">#${t.id} ${escapeHtml(t.title)}</div>` +
@@ -594,9 +635,34 @@ function wireKanbanDnD() {
   });
 }
 
+/* ---------- focus management for modals/palette: remember the opener, trap Tab,
+ * restore focus on close (WCAG 2.4.3 / 2.1.2) ---------- */
+let _lastFocus = null;
+function rememberFocus() { _lastFocus = document.activeElement; }
+function restoreFocus() {
+  if (_lastFocus && document.contains(_lastFocus) && _lastFocus.focus) _lastFocus.focus();
+  _lastFocus = null;
+}
+const MODAL_IDS = ["#palette", "#modal", "#modal-edit", "#modal-task", "#modal-feat", "#modal-help"];
+function openModalEl() { return MODAL_IDS.find((id) => !$(id).classList.contains("hidden")) || null; }
+// Tab / Shift+Tab must stay inside the open modal (focus trap). Returns true if consumed.
+function modalTrapTab(e) {
+  const el = openModalEl();
+  if (!el || e.key !== "Tab") return false;
+  const focusables = $(el).querySelectorAll(
+    "button, input, select, textarea, [tabindex]:not([tabindex='-1'])");
+  if (!focusables.length) { e.preventDefault(); return true; }
+  const first = focusables[0], last = focusables[focusables.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || !$(el).contains(active))) { last.focus(); e.preventDefault(); return true; }
+  if (!e.shiftKey && (active === last || !$(el).contains(active))) { first.focus(); e.preventDefault(); return true; }
+  return false;
+}
+
 /* ---------- task edit modal ---------- */
 
 function openTaskModal(t) {
+  rememberFocus();
   state.editingTaskId = t.id;
   // set only the text span: textContent on the h3 would destroy the copy button
   $("#task-modal-title-text").textContent = T("gui.task.edit_title", { id: t.id });
@@ -627,13 +693,13 @@ function openTaskModal(t) {
   $("#modal-task").classList.remove("hidden");
   $("#t-title").focus();
 }
-function closeTaskModal() { $("#modal-task").classList.add("hidden"); state.editingTaskId = null; }
+function closeTaskModal() { $("#modal-task").classList.add("hidden"); state.editingTaskId = null; restoreFocus(); }
 
 async function saveTaskModal() {
   const id = state.editingTaskId;
   if (id == null) return;
   const title = $("#t-title").value.trim();
-  if (!title) return;
+  if (!title) { showError(T("gui.err.title_required")); return; }
   const est = parseInt($("#t-est").value, 10);
   const parent = $("#t-parent").value;
   const feat = $("#t-feature").value;
@@ -653,7 +719,7 @@ async function saveTaskModal() {
 
 function renderTagFilter() {
   const sel = $("#filter-tag");
-  const tags = [...new Set(state.tasks.flatMap((t) => t.tags))].sort();
+  const tags = [...new Set(state.allTags.length ? state.allTags : state.tasks.flatMap((t) => t.tags))].sort();
   sel.innerHTML = `<option value="">${T("gui.all_tags")}</option>` +
     tags.map((t) => `<option value="${escapeHtml(t)}" ${t === state.filterTag ? "selected" : ""}>${escapeHtml(t)}</option>`).join("");
 }
@@ -726,12 +792,17 @@ function renderLogs() {
       input.value = e.content;
       div.replaceWith(input);
       input.focus();
+      let cancelled = false; // Escape cancels instead of saving via the induced blur
       const save = () => runAction(async () => {
+        if (cancelled || !input.isConnected) return; // Escape removed it / already saved
         const v = input.value.trim();
         if (v && v !== e.content) await api.post("/api/logs/update", { id: e.id, content: v });
         await loadAll();
       });
-      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save(); if (ev.key === "Escape") renderLogs(); });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") save();
+        if (ev.key === "Escape") { cancelled = true; renderLogs(); } // discard, no POST
+      });
       input.addEventListener("blur", save);
     };
     // two-step delete
@@ -774,7 +845,8 @@ function renderGit() {
   if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
   const box = $("#git-status");
   if (!st.linked) {
-    box.textContent = T("gui.git.none");
+    // distinguish "no repo linked" (normal) from a real load error
+    box.textContent = state.gitError ? ("⚠ " + state.gitError) : T("gui.git.none");
   } else {
     const last = st.last_commit;
     box.innerHTML =
@@ -810,7 +882,8 @@ async function gitLink() {
 
 async function gitSync() {
   const r = await api.post("/api/git/sync", {});
-  const n = (r.repos && r.repos[0] && r.repos[0].new) || 0;
+  // sum across ALL linked repos, not just the first one
+  const n = (r.repos || []).reduce((sum, repo) => sum + (repo.new || 0), 0);
   notify(T("gui.toast.git_synced", { n }));
   await loadAll();
 }
@@ -853,6 +926,8 @@ async function renderFeatures() {
       `<div class="feat-head"><b class="feat-name" data-open="${escapeHtml(f.name)}">⚑ ${escapeHtml(f.name)}</b> ` +
       `<span class="tag">${T("fstatus." + f.status)}</span> ` +
       (f.source === "ai" && f.confidence != null ? `<span class="dim">${T("gui.feat.confidence", { pct: (f.confidence * 100).toFixed(0) })}</span>` : "") +
+      `<span class="log-tools"><button class="mini-btn feat-edit" title="${T("gui.feat.edit_tt")}">✎</button>` +
+      `<button class="mini-btn feat-del" title="${T("gui.feat.del_tt")}">🗑</button></span>` +
       `</div>` +
       `<div class="feat-progress"><div class="bar" style="width:${bar}%"></div>` +
       `<span class="dim">${T("gui.feat.progress", { done: p.done, total: p.total, pct: p.pct })}</span></div>` +
@@ -867,23 +942,7 @@ async function renderFeatures() {
     if (state.featOpen === f.name) {
       const det = li.querySelector(".feat-detail");
       det.classList.remove("hidden");
-      try {
-        const d = await api.get("/api/features/show?ref=" + encodeURIComponent(f.name));
-        const tasks = (d.progress && d.progress.tasks) || [];
-        det.innerHTML = tasks.length
-          ? tasks.map((t) =>
-              `<div class="feat-task">#${t.id} ${escapeHtml(t.title)} ` +
-              `<span class="tag">${T("gui.col." + t.status)}</span>` +
-              (f.status === "open" ? `<button class="mini-btn feat-detach" data-id="${t.id}" title="${T("gui.feat.detach_tt")}">✕</button>` : "") +
-              `</div>`).join("")
-          : `<div class="dim">—</div>`;
-        det.querySelectorAll(".feat-detach").forEach((b) => {
-          b.onclick = () => runAction(async () => {
-            await api.post("/api/features/detach", { ref: f.name, task_id: parseInt(b.dataset.id, 10) });
-            await loadAll();
-          });
-        });
-      } catch { det.innerHTML = ""; }
+      loadFeatDetail(f, det); // async: fills when ready, never blocks the other cards
     }
     li.querySelectorAll("button[data-act]").forEach((b) => {
       b.onclick = () => runAction(async () => {
@@ -911,6 +970,23 @@ async function renderFeatures() {
         await loadAll();
       }
     });
+    const editBtn = li.querySelector(".feat-edit");
+    if (editBtn) editBtn.onclick = () => openFeatModal(f);
+    const delBtn = li.querySelector(".feat-del");
+    if (delBtn) delBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (delBtn.dataset.armed === "1") {
+        runAction(async () => {
+          await api.post("/api/features/delete", { ref: f.name });
+          notify(T("gui.toast.feat_deleted", { name: f.name }));
+          await loadAll();
+        });
+      } else {
+        delBtn.dataset.armed = "1";
+        delBtn.textContent = "?";
+        setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = "🗑"; }, 5000);
+      }
+    };
     ul.appendChild(li);
   }
   if (!ul.children.length) ul.innerHTML = `<li class="dim">${T("gui.feat.empty")}</li>`;
@@ -924,11 +1000,83 @@ async function renderFeatures() {
 
 async function addFeature() {
   const name = $("#feature-name").value.trim();
-  if (!name) return;
+  if (!name) { showError(T("gui.err.name_required")); return; }
   await api.post("/api/features/add", { name });
   $("#feature-name").value = "";
   await loadAll();
 }
+
+// fetch + render one expanded feature's linked tasks (called without await on purpose)
+async function loadFeatDetail(f, det) {
+  try {
+    const d = await api.get("/api/features/show?ref=" + encodeURIComponent(f.name));
+    const tasks = (d.progress && d.progress.tasks) || [];
+    det.innerHTML = tasks.length
+      ? tasks.map((t) =>
+          `<div class="feat-task">#${t.id} ${escapeHtml(t.title)} ` +
+          `<span class="tag">${T("gui.col." + t.status)}</span>` +
+          (f.status === "open" ? `<button class="mini-btn feat-detach" data-id="${t.id}" title="${T("gui.feat.detach_tt")}">✕</button>` : "") +
+          `</div>`).join("")
+      : `<div class="dim">—</div>`;
+    det.querySelectorAll(".feat-detach").forEach((b) => {
+      b.onclick = () => runAction(async () => {
+        await api.post("/api/features/detach", { ref: f.name, task_id: parseInt(b.dataset.id, 10) });
+        await loadAll();
+      });
+    });
+  } catch { det.innerHTML = ""; }
+}
+
+/* ---------- feature edit modal ---------- */
+
+function openFeatModal(f) {
+  rememberFocus();
+  state.editingFeatId = f.id;
+  $("#feat-modal-title").textContent = T("gui.feat.edit_title", { id: f.id });
+  $("#ft-name").value = f.name;
+  $("#ft-desc").value = f.description || "";
+  const delBtn = $("#btn-feat-delete");
+  delBtn.dataset.armed = "";
+  delBtn.textContent = T("gui.edit.delete");
+  delBtn.classList.remove("btn-danger-armed");
+  $("#modal-feat").classList.remove("hidden");
+  $("#ft-name").focus();
+}
+function closeFeatModal() { $("#modal-feat").classList.add("hidden"); state.editingFeatId = null; restoreFocus(); }
+
+async function saveFeatModal() {
+  const id = state.editingFeatId;
+  if (id == null) return;
+  const name = $("#ft-name").value.trim();
+  if (!name) { showError(T("gui.err.name_required")); return; }
+  const f = (state.features || []).find((x) => x.id === id);
+  await api.post("/api/features/update", { ref: f ? f.name : String(id), name, description: $("#ft-desc").value });
+  notify(T("gui.toast.feat_updated"));
+  closeFeatModal();
+  await loadAll();
+}
+
+$("#btn-cancel-feat").onclick = closeFeatModal;
+$("#btn-save-feat").onclick = () => runAction(saveFeatModal);
+$("#btn-feat-delete").onclick = () => {
+  const id = state.editingFeatId;
+  if (id == null) return;
+  const btn = $("#btn-feat-delete");
+  const f = (state.features || []).find((x) => x.id === id);
+  if (btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1";
+    btn.textContent = T("gui.feat.delete_confirm");
+    btn.classList.add("btn-danger-armed");
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.edit.delete"); btn.classList.remove("btn-danger-armed"); }, 6000);
+    return;
+  }
+  runAction(async () => {
+    await api.post("/api/features/delete", { ref: f ? f.name : String(id) });
+    notify(T("gui.toast.feat_deleted", { name: f ? f.name : id }));
+    closeFeatModal();
+    await loadAll();
+  });
+};
 
 /* ---------- stats & charts ---------- */
 
@@ -971,7 +1119,11 @@ function renderStats() {
   const s = state.stats;
   if (!s) return;
   if (state.tab !== "stats") return; // rebuilding charts on every poll is wasteful when hidden
-  const sig = JSON.stringify(s); // rebuild the 5 charts only when the data changed
+  // rebuild the 5 charts only when the data changed; round the live "today"
+  // minutes so a running session doesn't recreate all charts every 1.5 s poll
+  const sig = JSON.stringify({ ...s, minutes: s.minutes && {
+    today: Math.round(s.minutes.today), week: s.minutes.week,
+    month: s.minutes.month, all: s.minutes.all } });
   if (sig === renderStats._sig) return;
   renderStats._sig = sig;
   chartDefaults();
@@ -1071,8 +1223,12 @@ async function chatPlan(apply) {
       // remember the pending proposal for the confirm button, but never render
       // an internal marker into the chat log
       state.pendingPlan = title;
+      $("#btn-plan").textContent = T("gui.plan_create"); // 2nd click = create
+    } else {
+      state.pendingPlan = null;
+      $("#btn-plan").textContent = T("gui.plan_btn");
+      input.value = "";
     }
-    if (r.applied) input.value = "";
     renderChat();
     await loadAll();
   } catch (e) {
@@ -1101,7 +1257,7 @@ async function runAction(fn) {
 
 async function addTask() {
   const title = $("#new-task-title").value.trim();
-  if (!title) return;
+  if (!title) { showError(T("gui.err.title_required")); return; } // never fail silently
   const tags = $("#new-task-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
   const est = parseInt($("#new-task-est").value, 10);
   await api.post("/api/tasks/add", {
@@ -1146,12 +1302,13 @@ async function stopSession() {
 /* ---------- modal (new project) ---------- */
 
 function openModal() {
+  rememberFocus();
   $("#modal").classList.remove("hidden");
   $("#f-path").value = "";
   $("#f-detect").textContent = "";
   $("#f-name").focus();
 }
-function closeModal() { $("#modal").classList.add("hidden"); }
+function closeModal() { $("#modal").classList.add("hidden"); restoreFocus(); }
 
 // live-detect an existing project folder: engine + git repo + suggested name
 let detectTimer = null;
@@ -1179,7 +1336,7 @@ async function detectFolder() {
 
 async function createProject() {
   const name = $("#f-name").value.trim();
-  if (!name) return;
+  if (!name) { showError(T("gui.err.name_required")); return; }
   const body = {
     name,
     engine: $("#f-engine").value,
@@ -1203,6 +1360,7 @@ async function createProject() {
 /* ---------- modal (edit project: rename / engine / color / status / delete) ---------- */
 
 function openEditModal(p) {
+  rememberFocus();
   state.editingSlug = p.slug;
   $("#e-name").value = p.name;
   $("#e-engine").value = p.engine;
@@ -1218,7 +1376,7 @@ function openEditModal(p) {
   $("#modal-edit").classList.remove("hidden");
   $("#e-name").focus();
 }
-function closeEditModal() { $("#modal-edit").classList.add("hidden"); state.editingSlug = null; }
+function closeEditModal() { $("#modal-edit").classList.add("hidden"); state.editingSlug = null; restoreFocus(); }
 
 async function saveEditProject() {
   const ref = state.editingSlug;
@@ -1297,9 +1455,11 @@ $("#btn-save-edit").onclick = () => runAction(saveEditProject);
 $("#btn-edit-delete").onclick = () => runAction(deleteEditProject);
 $("#filter-tag").onchange = async (e) => { state.filterTag = e.target.value; await runAction(async () => { await loadTasks(); renderKanban(); renderTagFilter(); }); };
 $("#filter-priority").onchange = async (e) => { state.filterPrio = e.target.value; await runAction(async () => { await loadTasks(); renderKanban(); }); };
-$("#filter-search").addEventListener("input", async (e) => {
+let taskSearchTimer = null;
+$("#filter-search").addEventListener("input", (e) => {
   state.taskQuery = e.target.value;
-  await runAction(async () => { await loadTasks(); renderKanban(); });
+  clearTimeout(taskSearchTimer);
+  taskSearchTimer = setTimeout(() => runAction(async () => { await loadTasks(); renderKanban(); }), 250); // debounce: no request per keystroke
 });
 $("#git-task-filter").onchange = async (e) => { state.gitTaskFilter = e.target.value; await runAction(async () => { await loadGit(); renderGit(); }); };
 $("#btn-cancel-task").onclick = closeTaskModal;
@@ -1365,9 +1525,11 @@ $("#btn-session-stop").onclick = () => runAction(stopSession);
 $("#session-note").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(stopSession); });
 $("#btn-add-log").onclick = () => runAction(addLog);
 $("#log-content").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(addLog); });
-$("#log-search").addEventListener("input", async (e) => {
+let logSearchTimer = null;
+$("#log-search").addEventListener("input", (e) => {
   state.logQuery = e.target.value;
-  await runAction(async () => { await loadLogs(); renderLogs(); });
+  clearTimeout(logSearchTimer);
+  logSearchTimer = setTimeout(() => runAction(async () => { await loadLogs(); renderLogs(); }), 250);
 });
 document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
 $("#btn-git-link").onclick = () => runAction(gitLink);
@@ -1424,6 +1586,9 @@ api.get("/api/i18n")
   .catch(() => {})
   .finally(() => {
     loadUi(); // restore tab + filters before the first render
+    // load general settings once at boot too: the Pomodoro checkbox needs
+    // pomodoro_focus_min even when the user never opens the settings tab
+    loadSettings().catch(() => {});
     loadAll().then(() => {
       switchTab(state.tab);
       return api.get("/api/status").then((s) => { state.lastEventId = s.last_event_id || 0; });
@@ -1552,7 +1717,7 @@ function paletteItems(query) {
       runAction(async () => { await loadFeatures(); renderFeatures(); });
     } });
   }
-  for (const p of state.projects) {
+  for (const p of state.projects.filter((x) => !x.archived)) { // archived projects are not activatable
     const label = T("gui.cmd.set_active", { name: p.name });
     if (match(label)) items.push({ sectionKey: "projs", section: "gui.palette.projs", label, run: () => runAction(async () => {
       await api.post("/api/projects/set-active", { ref: p.slug });
@@ -1564,6 +1729,7 @@ function paletteItems(query) {
 }
 
 function openPalette() {
+  rememberFocus();
   palette.open = true;
   $("#palette").classList.remove("hidden");
   const inp = $("#palette-input");
@@ -1571,7 +1737,7 @@ function openPalette() {
   renderPalette();
   inp.focus();
 }
-function closePalette() { palette.open = false; $("#palette").classList.add("hidden"); }
+function closePalette() { palette.open = false; $("#palette").classList.add("hidden"); restoreFocus(); }
 
 function renderPalette() {
   palette.items = paletteItems($("#palette-input").value);
@@ -1601,7 +1767,10 @@ function renderPalette() {
 
 function paintPaletteActive() {
   document.querySelectorAll("#palette-list .palette-item")
-    .forEach((el, i) => el.classList.toggle("active", i === palette.idx));
+    .forEach((el, i) => {
+      el.classList.toggle("active", i === palette.idx);
+      if (i === palette.idx) el.scrollIntoView({ block: "nearest" }); // keep the active item visible
+    });
 }
 
 // returns true when the event was consumed by the palette
@@ -1620,14 +1789,19 @@ function paletteKey(e) {
 }
 
 /* ----- help modal ----- */
-function openHelp() { $("#modal-help").classList.remove("hidden"); }
-function closeHelp() { $("#modal-help").classList.add("hidden"); }
+function openHelp() { rememberFocus(); $("#modal-help").classList.remove("hidden"); }
+function closeHelp() { $("#modal-help").classList.add("hidden"); restoreFocus(); }
 $("#btn-close-help").onclick = closeHelp;
 
 /* ----- global keyboard shortcuts (ignored while typing in a field) ----- */
-const TAB_ORDER = ["tasks", "log", "git", "features", "stats", "ai", "settings"];
+// built from the VISIBLE tabs so the numbers stay consecutive when the AI tab is hidden
+function tabOrder() {
+  return ["tasks", "log", "git", "features", "stats", "ai", "settings"]
+    .filter((t) => t !== "ai" || state.ai.enabled);
+}
 document.addEventListener("keydown", (e) => {
   if (paletteKey(e)) return;
+  if (modalTrapTab(e)) return; // keep Tab inside the open modal/palette
   const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" ||
                              e.target.tagName === "SELECT" || e.target.isContentEditable);
   if (e.key === "Escape") {
@@ -1655,9 +1829,8 @@ document.addEventListener("keydown", (e) => {
     case "s": runAction(async () => { state.session ? await stopSession() : await startSession(); }); break;
     case "r": runAction(loadAll); break;
     case "1": case "2": case "3": case "4": case "5": case "6": case "7": {
-      const tab = TAB_ORDER[Number(e.key) - 1];
-      if (tab === "ai" && !state.ai.enabled) break;
-      switchTab(tab);
+      const tab = tabOrder()[Number(e.key) - 1];
+      if (tab) switchTab(tab);
       break;
     }
   }

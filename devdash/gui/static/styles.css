@@ -6,7 +6,7 @@
   --border: #262c38;
   --text: #e6e8ee;
   --text-dim: #9aa3b2;
-  --accent: #7c5cff;
+  --accent: #6a4fe6; /* was #7c5cff (4.35:1 on white < 4.5 WCAG AA) */
   --green: #3fb27f;
   --red: #e5534b;
   --yellow: #d9a13b;
@@ -101,6 +101,10 @@ body {
 .card.in_progress { border-left: 3px solid var(--yellow); }
 .card.done { opacity: .55; }
 .card.done .title { text-decoration: line-through; }
+.card.cancelled { opacity: .5; }
+.card.cancelled .title { text-decoration: line-through; }
+.col-cancelled { opacity: .8; }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } /* keyboard focus on cards */
 
 /* modal overlays: ALL modal containers share the fixed centered overlay
    (#modal-edit / #modal-task / #modal-help used to render in page flow) */
@@ -285,7 +289,7 @@ body {
   margin-left: 4px; visibility: hidden; background: none; border: none;
   color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 4px;
 }
-.project-list li:hover .proj-edit { visibility: visible; }
+.project-list li:hover .proj-edit, .project-list li:focus-within .proj-edit { visibility: visible; } /* keyboard users too */
 .project-list li .proj-edit:hover { color: var(--text); }
 .btn-danger { background: #3a1d22; border: 1px solid var(--red); color: #ffb4b4; }
 .btn-danger-armed { background: var(--red); color: #fff; font-weight: 600; }
@@ -300,7 +304,8 @@ body {
   background: none; border: none; color: var(--text-dim); cursor: pointer;
   font-size: 12px; padding: 0 3px; visibility: hidden;
 }
-.log-entry:hover .mini-btn, .feat-task:hover .mini-btn { visibility: visible; }
+.log-entry:hover .mini-btn, .log-entry:focus-within .mini-btn,
+.feat-task:hover .mini-btn, .feat-task:focus-within .mini-btn { visibility: visible; }
 .mini-btn:hover { color: var(--text); }
 .log-tools { margin-left: auto; }
 .log-head { display: flex; align-items: center; gap: 6px; }

@@ -42,12 +42,12 @@ def add_feature(
     ctx: typer.Context,
     name: str = typer.Argument(..., help=tr("opt.name_feat")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
-    description: str = typer.Option("", "--description", "-d"),
+    description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
 ) -> None:
     """Create a feature in a project (default: active)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    f = core.create(conn, proj.id, name, description)
+    f = guard(core.create, conn, proj.id, name, description)
     data = {**f.to_dict(), "project": proj.slug, "progress": core.progress(conn, f.id)}
     emit(ctx, data, lambda: console.print(
         tr("feature.created", name=f.name, slug=proj.slug)
@@ -57,8 +57,8 @@ def add_feature(
 @app.command("list", help=tr("feature.list.help"))
 def list_features(
     ctx: typer.Context,
-    project: str | None = typer.Option(None, "--project", "-p"),
-    status: str | None = typer.Option(None, "--status", "-s"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+    status: str | None = typer.Option(None, "--status", "-s", help=tr("opt.filter_status")),
 ) -> None:
     """List features with their task progress."""
     conn = get_conn(ctx)
@@ -71,7 +71,7 @@ def list_features(
 def show_feature(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Feature detail: progress, linked tasks, linked commits."""
     from devdash.core import gitwatch
@@ -107,14 +107,14 @@ def link_tasks(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
     task_ids: list[int] = typer.Argument(..., help=tr("opt.task_ids")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Attach tasks to a feature."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
     f = None
     for tid in task_ids:
-        f = core.attach(conn, ref, tid, pid)
+        f = guard(core.attach, conn, ref, tid, pid)
     emit(ctx, {"feature": f.to_dict(), "linked": task_ids}, lambda: console.print(
         tr("feature.linked", n=len(task_ids), name=f.name)
     ))
@@ -125,12 +125,12 @@ def unlink_task(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
     task_id: int = typer.Argument(..., help=tr("opt.task_id")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Detach a task from a feature."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    f = core.detach(conn, ref, task_id, pid)
+    f = guard(core.detach, conn, ref, task_id, pid)
     emit(ctx, {"feature": f.to_dict(), "unlinked": task_id}, lambda: console.print(
         tr("feature.unlinked", id=task_id, name=f.name)
     ))
@@ -140,7 +140,7 @@ def unlink_task(
 def done_feature(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
     note: str = typer.Option("", "--note", "-n", help=tr("opt.note_val")),
 ) -> None:
     """MANUAL validation: mark a feature as done. Human decision, recorded with a timestamp."""
@@ -156,8 +156,8 @@ def done_feature(
 def approve_feature(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.pending")),
-    project: str | None = typer.Option(None, "--project", "-p"),
-    note: str = typer.Option("", "--note", "-n"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+    note: str = typer.Option("", "--note", "-n", help=tr("opt.note")),
 ) -> None:
     """Approve a (e.g. AI) proposal: the feature becomes done."""
     conn = get_conn(ctx)
@@ -173,7 +173,7 @@ def reject_feature(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
     feedback: str = typer.Option("", "--feedback", "-f", help=tr("opt.feedback")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Reject a proposal; feedback is stored so it is not proposed again in a loop."""
     conn = get_conn(ctx)
@@ -188,9 +188,9 @@ def reject_feature(
 def propose_feature(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
-    confidence: float = typer.Option(0.8, "--confidence", "-c"),
-    reasoning: str = typer.Option("", "--reasoning", "-r"),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    confidence: float = typer.Option(0.8, "--confidence", "-c", help=tr("opt.confidence")),
+    reasoning: str = typer.Option("", "--reasoning", "-r", help=tr("opt.reasoning")),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Record a proposal (used by the AI assistant). NEVER marks done."""
     conn = get_conn(ctx)
@@ -205,10 +205,45 @@ def propose_feature(
 def reopen_feature(
     ctx: typer.Context,
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
-    project: str | None = typer.Option(None, "--project", "-p"),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Reopen a feature (back to 'open')."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
     f = guard(core.reopen, conn, ref, pid)
     emit(ctx, f.to_dict(), lambda: console.print(tr("feature.reopened", name=f.name)))
+
+
+@app.command("edit", help=tr("feature.edit.help"))
+def edit_feature(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
+    name: str | None = typer.Option(None, "--name", "-n", help=tr("opt.name_feat")),
+    description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """Rename / edit a feature (name stays unique within the project)."""
+    conn = get_conn(ctx)
+    pid = resolve_project(conn, project).id if project else None
+    f = guard(core.update, conn, ref, pid, name=name, description=description)
+    emit(ctx, f.to_dict(), lambda: console.print(tr("feature.updated", name=f.name)))
+
+
+@app.command("delete", help=tr("feature.delete.help"))
+def delete_feature(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=tr("opt.yes")),
+) -> None:
+    """Permanently delete a feature. Linked tasks are detached, not deleted."""
+    conn = get_conn(ctx)
+    pid = resolve_project(conn, project).id if project else None
+    f = core.get(conn, ref, pid)
+    if f is None:
+        raise typer.BadParameter(tr("err.no_feature", ref=ref))
+    if not yes and not typer.confirm(tr("feature.delete.confirm", name=f.name)):
+        raise typer.Abort()
+    guard(core.delete, conn, f.id, pid)
+    emit(ctx, {"deleted": f.id, "name": f.name},
+         lambda: console.print(tr("feature.deleted", name=f.name)))

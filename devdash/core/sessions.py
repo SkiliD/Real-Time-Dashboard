@@ -58,6 +58,8 @@ def start(
 ) -> Session:
     if kind not in VALID_KINDS:
         raise ValueError(f"invalid kind {kind!r}, expected one of {VALID_KINDS}")
+    if minutes is not None and (isinstance(minutes, bool) or not isinstance(minutes, int) or not (1 <= minutes <= 24 * 60)):
+        raise ValueError("minutes must be an integer between 1 and 1440")
     if project_id is None:
         active = projects.get_active(conn)
         if active is None:
@@ -71,9 +73,12 @@ def start(
             raise KeyError(f"no task #{task_id}")
     now = now_iso()
     # Atomic: stop ANY still-running sessions (normally at most one) and insert
-    # the new one in a single transaction — a crash can never leave two running.
+    # the new one in a single IMMEDIATE transaction — BEGIN IMMEDIATE takes the
+    # write lock up front, so the SELECT + INSERT are truly serialized against
+    # other writers (CLI/GUI/watcher) and a crash can never leave two running.
     # Auto-stopped sessions emit their own "stopped" event so live GUIs see it.
-    with conn:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
         stale = conn.execute(
             "SELECT id FROM sessions WHERE ended_at IS NULL"
         ).fetchall()
@@ -91,7 +96,13 @@ def start(
             (project_id, task_id, kind, now, minutes),
         )
         session_id = cur.lastrowid
-        events.append(conn, "session", session_id, "started", None, commit=False)
+        # NOTE: the "started" event is emitted ONCE, after the commit, with the
+        # full payload (a second bare event inside the transaction would make
+        # pollers see two "started" for one session).
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     session = get(conn, session_id)
     assert session is not None
     events.append(conn, "session", session.id, "started", session.to_dict())
@@ -112,10 +123,15 @@ def stop(conn: sqlite3.Connection, session_id: int | None = None, note: str = ""
         raise ValueError(f"session #{session_id} is already stopped")
     ended = now_iso()
     duration = max(0.0, round((_parse(ended) - _parse(session.started_at)).total_seconds() / 60, 2))
-    conn.execute(
-        "UPDATE sessions SET ended_at = ?, duration_min = ?, note = ? WHERE id = ?",
+    # Idempotent stop: the WHERE ended_at IS NULL guard makes a concurrent second
+    # stop a no-op instead of overwriting ended_at/duration/note.
+    cur = conn.execute(
+        "UPDATE sessions SET ended_at = ?, duration_min = ?, note = ? "
+        "WHERE id = ? AND ended_at IS NULL",
         (ended, duration, note or session.note, session_id),
     )
+    if cur.rowcount == 0:
+        raise ValueError(f"session #{session_id} is already stopped")
     conn.commit()
     session = get(conn, session_id)
     assert session is not None

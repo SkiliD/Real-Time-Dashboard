@@ -24,15 +24,15 @@ def create(conn: sqlite3.Connection, project_id: int, name: str, description: st
         raise ValueError("feature name is empty")
     if projects.get(conn, project_id) is None:
         raise KeyError(f"no project with id {project_id}")
-    cur = conn.execute(
-        "INSERT INTO features(project_id, name, description, status, source, created_at) "
-        "VALUES (?, ?, ?, 'open', 'manual', ?)",
-        (project_id, name, description, now_iso()),
-    )
-    conn.commit()
-    f = get(conn, cur.lastrowid)
-    assert f is not None
-    events.append(conn, "feature", f.id, "created", f.to_dict())
+    with conn:  # row + event in one transaction
+        cur = conn.execute(
+            "INSERT INTO features(project_id, name, description, status, source, created_at) "
+            "VALUES (?, ?, ?, 'open', 'manual', ?)",
+            (project_id, name, description, now_iso()),
+        )
+        f = get(conn, cur.lastrowid)
+        assert f is not None
+        events.append(conn, "feature", f.id, "created", f.to_dict(), commit=False)
     return f
 
 
@@ -97,6 +97,11 @@ def attach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: i
     t = tsk.get(conn, task_id)
     if t is None:
         raise KeyError(f"no task #{task_id}")
+    if t.project_id != f.project_id:
+        raise ValueError(
+            f"task #{task_id} belongs to project #{t.project_id}, "
+            f"feature {f.name!r} belongs to project #{f.project_id}"
+        )
     tsk.update(conn, task_id, feature_id=f.id)
     events.append(conn, "feature", f.id, "task_attached", {"task_id": task_id})
     return f
@@ -148,13 +153,13 @@ def propose(
         raise KeyError(f"no feature matching {ref!r}")
     if f.status == "done":
         raise ValueError(f"feature {f.name!r} is already done")
-    conn.execute(
-        "UPDATE features SET status = 'proposed', source = ?, confidence = ?, reasoning = ? WHERE id = ?",
-        (source, confidence, reasoning, f.id),
-    )
-    conn.commit()
-    f = get(conn, f.id)
-    events.append(conn, "feature", f.id, "proposed", f.to_dict())
+    with conn:
+        conn.execute(
+            "UPDATE features SET status = 'proposed', source = ?, confidence = ?, reasoning = ? WHERE id = ?",
+            (source, confidence, reasoning, f.id),
+        )
+        f = get(conn, f.id)
+        events.append(conn, "feature", f.id, "proposed", f.to_dict(), commit=False)
     return f
 
 
@@ -166,13 +171,14 @@ def approve(conn: sqlite3.Connection, ref: int | str, project_id: int | None = N
     if f.status == "done":
         raise ValueError(f"feature {f.name!r} is already done")
     now = now_iso()
-    conn.execute(
-        "UPDATE features SET status = 'done', validated_at = ?, feedback = ? WHERE id = ?",
-        (now, note or None, f.id),
-    )
-    conn.commit()
-    f = get(conn, f.id)
-    events.append(conn, "feature", f.id, "validated", {**f.to_dict(), "by": "human", "note": note})
+    with conn:
+        conn.execute(
+            "UPDATE features SET status = 'done', validated_at = ?, feedback = ? WHERE id = ?",
+            (now, note or None, f.id),
+        )
+        f = get(conn, f.id)
+        events.append(conn, "feature", f.id, "validated",
+                      {**f.to_dict(), "by": "human", "note": note}, commit=False)
     return f
 
 
@@ -181,13 +187,13 @@ def reject(conn: sqlite3.Connection, ref: int | str, feedback: str = "", project
     f = get(conn, ref, project_id)
     if f is None:
         raise KeyError(f"no feature matching {ref!r}")
-    conn.execute(
-        "UPDATE features SET status = 'rejected', feedback = ? WHERE id = ?",
-        (feedback, f.id),
-    )
-    conn.commit()
-    f = get(conn, f.id)
-    events.append(conn, "feature", f.id, "rejected", {**f.to_dict(), "feedback": feedback})
+    with conn:
+        conn.execute(
+            "UPDATE features SET status = 'rejected', feedback = ? WHERE id = ?",
+            (feedback, f.id),
+        )
+        f = get(conn, f.id)
+        events.append(conn, "feature", f.id, "rejected", {**f.to_dict(), "feedback": feedback}, commit=False)
     return f
 
 
@@ -195,11 +201,66 @@ def reopen(conn: sqlite3.Connection, ref: int | str, project_id: int | None = No
     f = get(conn, ref, project_id)
     if f is None:
         raise KeyError(f"no feature matching {ref!r}")
-    conn.execute(
-        "UPDATE features SET status = 'open', validated_at = NULL, confidence = NULL, reasoning = NULL WHERE id = ?",
-        (f.id,),
-    )
-    conn.commit()
-    f = get(conn, f.id)
-    events.append(conn, "feature", f.id, "reopened", f.to_dict())
+    with conn:
+        conn.execute(
+            "UPDATE features SET status = 'open', validated_at = NULL, confidence = NULL, reasoning = NULL WHERE id = ?",
+            (f.id,),
+        )
+        f = get(conn, f.id)
+        events.append(conn, "feature", f.id, "reopened", f.to_dict(), commit=False)
+    return f
+
+
+def update(
+    conn: sqlite3.Connection,
+    ref: int | str,
+    project_id: int | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> Feature:
+    """Rename / edit a feature. Names stay unique within a project."""
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise ValueError("feature name is empty")
+        dup = conn.execute(
+            "SELECT id FROM features WHERE project_id = ? AND name = ? AND id != ?",
+            (f.project_id, name, f.id),
+        ).fetchone()
+        if dup:
+            raise ValueError(f"feature {name!r} already exists in this project")
+    fields, values = [], []
+    if name is not None:
+        fields.append("name = ?")
+        values.append(name)
+    if description is not None:
+        fields.append("description = ?")
+        values.append(description)
+    if fields:
+        values.append(f.id)
+        with conn:
+            conn.execute(f"UPDATE features SET {', '.join(fields)} WHERE id = ?", values)
+            f = get(conn, f.id)
+            events.append(conn, "feature", f.id, "updated", f.to_dict(), commit=False)
+    return f
+
+
+def delete(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature:
+    """Hard-delete a feature (explicit human action; the GUI/CLI confirm first).
+
+    Linked tasks are NOT deleted: their feature_id is set to NULL. The feature's
+    events are cleaned up in the same transaction.
+    """
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    with conn:
+        conn.execute("DELETE FROM events WHERE entity = 'feature' AND entity_id = ?", (f.id,))
+        conn.execute("UPDATE tasks SET feature_id = NULL WHERE feature_id = ?", (f.id,))
+        conn.execute("DELETE FROM features WHERE id = ?", (f.id,))
+    events.append(conn, "feature", f.id, "deleted", {"id": f.id, "name": f.name})
     return f
