@@ -13,6 +13,7 @@
   --radius: 8px;
   --font: "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  color-scheme: dark; /* native controls (scrollbars, spinners, selects, color input) render dark */
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -247,7 +248,7 @@ body {
 
 /* settings tab (AI provider configuration) */
 .settings-card {
-  max-width: 560px; background: var(--panel); border: 1px solid var(--border);
+  background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 18px 20px;
 }
 .settings-card h3 { margin: 0 0 4px; }
@@ -274,7 +275,8 @@ body {
 }
 .settings-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
 .small { font-size: 12px; }
-.settings-card { margin-bottom: 14px; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; align-items: start; }
+.settings-grid .settings-card { margin-bottom: 0; }
 .settings-card textarea {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 7px 9px; font-family: var(--mono); font-size: 12px;
@@ -329,7 +331,7 @@ body {
 #session-kind-sel { width: auto; }
 
 /* stats filters toolbar */
-#stats-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+#stats-toolbar { display: flex; gap: 14px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 #stats-toolbar label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 #stats-toolbar select {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
@@ -390,3 +392,57 @@ h1.clickable:hover { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- DA consistency: scrollbars, native controls, stepper, tab layout ---------- */
+
+/* thin dark scrollbars everywhere (was: default light OS scrollbar on dark theme) */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 6px; border: 2px solid var(--bg);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* number inputs: keep the native spinners (usable), dark via color-scheme */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
+
+/* duration stepper in the session panel — matches the DA instead of the light native spinner */
+.stepper { display: inline-flex; align-items: stretch; }
+.stepper button {
+  width: 24px; padding: 0; background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; font-size: 14px; line-height: 1;
+}
+.stepper button:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
+.stepper button:first-child { border-radius: 6px 0 0 6px; border-right: none; }
+.stepper button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+#session-panel .stepper input[type="number"] {
+  width: 52px; border-radius: 0; border-left: none; border-right: none;
+  text-align: center; padding: 5px 2px;
+}
+
+/* settings tab: scrollable + full-width card grid, like the other tabs
+   (was: one narrow 560px column, no scroll on short windows) */
+#tab-settings { overflow-y: auto; padding: 16px 20px 24px; }
+
+/* stats tab: toolbar aligned with the other tabs; chart area scrolls, cards stay put */
+#tab-stats { overflow: hidden; }
+#stat-cards { flex-shrink: 0; }
+.chart-grid { flex: 1; min-height: 0; }
+
+/* selects: custom chevron + dark popup, consistent with the other inputs
+   (was: native light arrow and light dropdown list on the dark theme) */
+#task-toolbar select, #session-panel select, #git-toolbar select, #stats-toolbar select,
+.settings-card select, .modal-card select, .feat-actions select {
+  -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa3b2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  padding-right: 28px;
+}
+#git-toolbar select { /* had no base styling at all */
+  background-color: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 5px 28px 5px 8px; font: inherit;
+}
+select option { background: var(--panel-2); color: var(--text); }

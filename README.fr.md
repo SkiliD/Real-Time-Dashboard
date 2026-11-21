@@ -68,6 +68,12 @@ pip install -e ".[gui,test]"
 
 Ou sans environnement virtuel : `pipx install .`
 
+> **Windows — note AppLocker/WDAC** : si `devdash` échoue avec « Une stratégie de contrôle
+> d'application a bloqué ce fichier » (le lanceur `devdash.exe` généré par pip n'est pas
+> signé), passe par l'interpréteur : `.venv\Scripts\python.exe -m devdash gui`
+> (ou `py -m devdash gui`). Un shim `devdash.bat` appelant `python -m devdash %*` fonctionne
+> aussi — les `.bat` ne sont pas concernés par le blocage des exécutables.
+
 Alias pratique (optionnel) : `alias dd='devdash'` dans ton `~/.bashrc` / `~/.zshrc`
 (`dd.bat` appelant `devdash %*` sous Windows).
 

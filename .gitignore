@@ -57,6 +57,8 @@ logs/
 
 # --- Outils locaux (Vibe : skills, hooks, logs de session) ---
 .vibe/
+# Règles agent locales (ex. : ne jamais git push) — propres à chaque machine
+/AGENTS.md
 # Packs de skills téléchargés localement (ex. depuis un tweet)
 /_pro-max/
 /_vercel-skills/

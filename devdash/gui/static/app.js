@@ -1522,6 +1522,15 @@ $("#stats-days").onchange = async (e) => { state.statsFilters.days = e.target.va
 $("#stats-group").onchange = async (e) => { state.statsFilters.group = e.target.value; await runAction(async () => { await loadStats(); renderStats(); }); };
 $("#btn-session-start").onclick = () => runAction(startSession);
 $("#btn-session-stop").onclick = () => runAction(stopSession);
+
+function bumpSessionMinutes(delta) {
+  const el = $("#session-minutes");
+  let v = parseInt(el.value, 10);
+  if (Number.isNaN(v)) v = 0;
+  el.value = Math.min(480, Math.max(1, v + delta));
+}
+$("#sess-minus").onclick = () => bumpSessionMinutes(-5);
+$("#sess-plus").onclick = () => bumpSessionMinutes(5);
 $("#session-note").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(stopSession); });
 $("#btn-add-log").onclick = () => runAction(addLog);
 $("#log-content").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(addLog); });

@@ -45,7 +45,11 @@
           <option value="pause" data-i18n="kind.pause">Pause</option>
           <option value="custom" data-i18n="kind.custom">Libre</option>
         </select>
-        <input id="session-minutes" type="number" min="1" max="480" step="5" data-i18n-ph="gui.sess.minutes" placeholder="min" data-i18n-title="gui.sess.minutes_tt" title="Durée (min, optionnel)" style="width:64px">
+        <div class="stepper" data-i18n-title="gui.sess.minutes_tt" title="Durée (min, optionnel)">
+          <button type="button" id="sess-minus" data-i18n-title="gui.sess.minus_tt" title="Diminuer de 5 min">−</button>
+          <input id="session-minutes" type="number" min="1" max="480" step="5" data-i18n-ph="gui.sess.minutes" placeholder="min">
+          <button type="button" id="sess-plus" data-i18n-title="gui.sess.plus_tt" title="Augmenter de 5 min">+</button>
+        </div>
         <label class="dim chk-inline" data-i18n-title="gui.sess.pomodoro" title="Pomodoro"><input type="checkbox" id="session-pomodoro"> 🍅</label>
         <button id="btn-session-start" class="btn btn-sm btn-primary" data-i18n="gui.session_start">▶ Session</button>
         <input id="session-note" class="hidden" type="text" data-i18n-ph="gui.session_note_ph" placeholder="Note de fin (fait / blocage)…">
@@ -153,6 +157,7 @@
     </section>
 
     <section id="tab-settings" class="tab-page hidden">
+      <div class="settings-grid">
       <div class="settings-card">
         <h3 data-i18n="gui.set.title">Assistant IA (optionnel)</h3>
         <p class="dim" data-i18n="gui.set.sub"></p>
@@ -257,6 +262,7 @@
           <button id="btn-upd-run" class="btn btn-primary" data-i18n="gui.upd.update">Mettre à jour maintenant</button>
           <span id="upd-status" class="dim"></span>
         </div>
+      </div>
       </div>
     </section>
 
