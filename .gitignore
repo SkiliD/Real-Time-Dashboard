@@ -1,0 +1,78 @@
+# DevDash — .gitignore
+# Ne jamais committer : caches, venv, données locales, secrets (clés API IA…).
+
+# --- Python : caches et artefacts de build ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+*.whl
+
+# --- Environnements virtuels ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Tests, lint, typage : caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# --- Données DevDash locales (si DEVDASH_HOME pointe DANS le dépôt) ---
+# Contient devdash.db (données) et config.json (CLÉS API IA -> secret !)
+.devdash/
+devdash.db
+devdash.db-wal
+devdash.db-shm
+*.db
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+# config.json à la racine du dépôt = DEVDASH_HOME=racine -> clés API en clair
+/config.json
+
+# --- Secrets et fichiers sensibles (y compris IA) ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*secret*
+# Modèles d'IA locaux téléchargés (fichiers énormes, ex. Ollama/GGUF)
+*.gguf
+*.safetensors
+ollama/
+.models/
+# Caches/logs locaux de providers IA
+.ai-cache/
+*.log
+logs/
+
+# --- Outils locaux (Vibe : skills, hooks, logs de session) ---
+.vibe/
+# Packs de skills téléchargés localement (ex. depuis un tweet)
+/_pro-max/
+/_vercel-skills/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDE / éditeur ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Divers ---
+/tmp/
+*.tmp

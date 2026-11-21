@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devdash"
+version = "0.1.0"
+description = "DevDash - portable local dev dashboard for solo developers (game or not): CLI + native desktop GUI, read-only Git integration, optional AI assistant."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# The CORE (devdash.core) is stdlib-only. CLI deps below are only needed for the CLI.
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+gui = ["pywebview>=5.0"]   # native desktop window (uses the OS webview: WebView2 on Windows)
+test = ["pytest>=8.0"]
+
+[project.scripts]
+devdash = "devdash.cli.main:entrypoint"
+
+[tool.setuptools.packages.find]
+include = ["devdash*"]
+
+[tool.setuptools.package-data]
+devdash = ["core/schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

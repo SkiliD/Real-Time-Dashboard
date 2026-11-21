@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevDash</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <aside id="sidebar">
+
+    <div class="brand">Dev<span>Dash</span></div>
+    <button id="btn-new-project" class="btn btn-primary btn-block" data-i18n="gui.new_project">+ Nouveau projet</button>
+    <ul id="project-list" class="project-list"></ul>
+    <div class="sidebar-footer"><span data-i18n="gui.local">local · </span><span id="conn-status">●</span></div>
+  </aside>
+
+  <main id="main">
+
+    <header id="project-header">
+
+      <div id="project-header-left"></div>
+      <div class="spacer"></div>
+      <div id="session-panel">
+
+        <div id="session-timer" class="hidden">
+          <span class="pulse">⏱</span> <span id="session-clock" class="mono">00:00</span>
+          <span id="session-kind" class="dim"></span>
+        </div>
+        <select id="session-task" data-i18n-title="gui.session_task_title" title="Tâche liée à la session"><option value="" data-i18n="gui.no_task">— Sans tâche —</option></select>
+        <button id="btn-session-start" class="btn btn-sm btn-primary" data-i18n="gui.session_start">▶ Session</button>
+        <input id="session-note" class="hidden" type="text" data-i18n-ph="gui.session_note_ph" placeholder="Note de fin (fait / blocage)…">
+        <button id="btn-session-stop" class="btn btn-sm hidden" data-i18n="gui.session_stop">■ Stop</button>
+      </div>
+    </header>
+
+    <nav id="tabs">
+      <button class="tab active" data-tab="tasks" data-i18n="gui.tab.tasks">Tâches</button>
+      <button class="tab" data-tab="log" data-i18n="gui.tab.log">Devlog</button>
+      <button class="tab" data-tab="git" data-i18n="gui.tab.git">Git</button>
+      <button class="tab" data-tab="features" data-i18n="gui.tab.features">Features</button>
+      <button class="tab" data-tab="stats" data-i18n="gui.tab.stats">Stats</button>
+      <button class="tab hidden" data-tab="ai" id="tab-ai-btn" data-i18n="gui.tab.ai">Assistant IA</button>
+    </nav>
+
+    <section id="tab-tasks" class="tab-page">
+
+      <div id="task-toolbar">
+        <input id="new-task-title" type="text" data-i18n-ph="gui.new_task_ph" placeholder="Nouvelle tâche… (Entrée pour ajouter)">
+        <select id="new-task-priority">
+          <option value="low" data-i18n="prio.low">Basse</option>
+          <option value="medium" selected data-i18n="prio.medium">Moyenne</option>
+          <option value="high" data-i18n="prio.high">Haute</option>
+          <option value="critical" data-i18n="prio.critical">Critique</option>
+        </select>
+        <input id="new-task-tags" type="text" data-i18n-ph="gui.tags_ph" placeholder="Tags (séparés par des virgules)">
+        <input id="new-task-est" type="number" min="0" step="5" data-i18n-ph="gui.est_ph" placeholder="Est. (min)" data-i18n-title="gui.est_title" title="Estimation en minutes">
+        <button id="btn-add-task" class="btn" data-i18n="gui.add">Ajouter</button>
+        <span class="spacer"></span>
+        <select id="filter-tag"><option value="" data-i18n="gui.all_tags">Tous les tags</option></select>
+      </div>
+
+      <div id="kanban">
+        <div class="col" data-status="todo"><h3><span data-i18n="gui.col.todo">À faire</span> <span class="count" id="count-todo"></span></h3><div class="cards" id="col-todo"></div></div>
+        <div class="col" data-status="in_progress"><h3><span data-i18n="gui.col.in_progress">En cours</span> <span class="count" id="count-in_progress"></span></h3><div class="cards" id="col-in_progress"></div></div>
+        <div class="col" data-status="done"><h3><span data-i18n="gui.col.done">Terminées</span> <span class="count" id="count-done"></span></h3><div class="cards" id="col-done"></div></div>
+      </div>
+
+      <div id="sessions-section">
+        <h3 data-i18n="gui.sessions_recent">Sessions récentes</h3>
+        <ul id="session-list"></ul>
+      </div>
+    </section>
+
+    <section id="tab-log" class="tab-page hidden">
+      <div id="log-toolbar">
+        <input id="log-content" type="text" data-i18n-ph="gui.log_ph" placeholder="Nouvelle entrée de devlog… (Entrée pour ajouter)">
+        <input id="log-tags" type="text" data-i18n-ph="gui.tags_ph" placeholder="Tags (séparés par des virgules)">
+        <button id="btn-add-log" class="btn" data-i18n="gui.add">Ajouter</button>
+        <span class="spacer"></span>
+        <input id="log-search" type="text" data-i18n-ph="gui.log_search_ph" placeholder="Rechercher dans le devlog…">
+      </div>
+      <ul id="log-list"></ul>
+    </section>
+
+    <section id="tab-git" class="tab-page hidden">
+      <div id="git-toolbar">
+        <input id="git-path" type="text" data-i18n-ph="gui.git_path_ph" placeholder="Chemin du dépôt Git local…">
+        <button id="btn-git-link" class="btn btn-sm" data-i18n="gui.git_link">Lier le dépôt</button>
+        <button id="btn-git-unlink" class="btn btn-sm" data-i18n="gui.git_unlink">Délier</button>
+        <button id="btn-git-sync" class="btn btn-sm" data-i18n="gui.git_sync">↻ Sync</button>
+        <span class="spacer"></span>
+        <label class="dim"><input type="checkbox" id="git-unparsed"> <span data-i18n="gui.git_unparsed">Commits non reconnus</span></label>
+      </div>
+      <div id="git-status" class="dim"></div>
+      <ul id="git-commit-list"></ul>
+    </section>
+
+    <section id="tab-features" class="tab-page hidden">
+      <div id="feature-toolbar">
+        <input id="feature-name" type="text" data-i18n-ph="gui.feature_ph" placeholder="Nouvelle feature (ex. : dash)…">
+        <button id="btn-add-feature" class="btn" data-i18n="gui.add">Ajouter</button>
+      </div>
+      <ul id="feature-list"></ul>
+    </section>
+
+    <section id="tab-ai" class="tab-page hidden">
+      <div id="ai-banner" class="hidden"></div>
+      <div id="chat-log"></div>
+      <div id="chat-plan-row">
+        <input id="plan-input" type="text" data-i18n-ph="gui.plan_ph" placeholder="Grosse tâche à découper… (ex. : système de dash)">
+        <button id="btn-plan" class="btn btn-sm" data-i18n="gui.plan_btn">Proposer un plan</button>
+      </div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" data-i18n-ph="gui.chat_ph" placeholder="Poser une question à l’assistant… (Entrée)">
+        <button id="btn-chat-send" class="btn btn-sm btn-primary" data-i18n="gui.chat_send">Envoyer</button>
+        <button id="btn-chat-week" class="btn btn-sm" data-i18n="gui.chat_week">Résumer ma semaine</button>
+      </div>
+    </section>
+
+    <section id="tab-stats" class="tab-page hidden">
+      <div id="stat-cards">
+        <div class="stat-card"><div class="stat-value" id="stat-today">–</div><div class="stat-label" data-i18n="gui.stat.today">Aujourd’hui</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-week">–</div><div class="stat-label" data-i18n="gui.stat.week">7 jours</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-month">–</div><div class="stat-label" data-i18n="gui.stat.month">30 jours</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-streak">–</div><div class="stat-label" data-i18n="gui.stat.streak">Série 🔥</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-progress">–</div><div class="stat-label" data-i18n="gui.stat.progress">Progression</div></div>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-box"><h4 data-i18n="gui.chart.time">Temps par jour (14 j)</h4><canvas id="chart-time"></canvas></div>
+        <div class="chart-box"><h4 data-i18n="gui.chart.done">Tâches faites par jour (7 j)</h4><canvas id="chart-done"></canvas></div>
+        <div class="chart-box"><h4 data-i18n="gui.chart.tags">Répartition par tag (tâches)</h4><canvas id="chart-tags"></canvas></div>
+        <div class="chart-box"><h4 data-i18n="gui.chart.progress">Progression du projet (pondérée)</h4><canvas id="chart-progress"></canvas></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="hidden">
+  <div class="modal-card">
+    <h3 data-i18n="gui.modal.title">Nouveau projet</h3>
+    <label><span data-i18n="gui.modal.name">Nom</span> <input id="f-name" type="text" placeholder="Aether Vale"></label>
+    <label><span data-i18n="gui.modal.engine">Moteur / tech</span>
+      <select id="f-engine">
+        <option value="unity">Unity</option><option value="unreal">Unreal</option>
+        <option value="godot">Godot</option><option value="web">Web</option>
+        <option value="other" selected data-i18n="engine.other">Autre</option>
+      </select>
+    </label>
+    <label><span data-i18n="gui.modal.color">Couleur</span> <input id="f-color" type="color" value="#7c5cff"></label>
+    <label><span data-i18n="gui.modal.status">Statut</span>
+      <select id="f-status">
+        <option value="idea" selected data-i18n="pstatus.idea">Idée</option><option value="design" data-i18n="pstatus.design">Conception</option>
+        <option value="prototype" data-i18n="pstatus.prototype">Prototype</option><option value="development" data-i18n="pstatus.development">Développement</option>
+        <option value="beta" data-i18n="pstatus.beta">Beta</option><option value="done" data-i18n="pstatus.done">Terminé</option><option value="paused" data-i18n="pstatus.paused">En pause</option>
+      </select>
+    </label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <input id="f-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <div class="modal-actions">
+      <button id="btn-cancel-modal" class="btn" data-i18n="gui.modal.cancel">Annuler</button>
+      <button id="btn-create-project" class="btn btn-primary" data-i18n="gui.modal.create">Créer</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

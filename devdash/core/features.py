@@ -1,0 +1,188 @@
+"""Features (core) — step (h).
+
+A feature groups tasks of a project. RULE ABSOLUE: a feature becomes 'done'
+ONLY through an explicit human decision — `feature done <nom>` (manual) or
+approving an AI proposal. The system NEVER marks a feature done by itself:
+`check_completion()` is only a *signal* used to EMIT proposals (step i).
+Rejected proposals store feedback so they are not proposed again in a loop.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+
+from . import events, projects
+from . import tasks as tsk
+from .models import Feature, now_iso
+
+VALID_STATUSES = ("open", "proposed", "done", "rejected")
+
+
+def create(conn: sqlite3.Connection, project_id: int, name: str, description: str = "") -> Feature:
+    name = name.strip()
+    if not name:
+        raise ValueError("feature name is empty")
+    if projects.get(conn, project_id) is None:
+        raise KeyError(f"no project with id {project_id}")
+    cur = conn.execute(
+        "INSERT INTO features(project_id, name, description, status, source, created_at) "
+        "VALUES (?, ?, ?, 'open', 'manual', ?)",
+        (project_id, name, description, now_iso()),
+    )
+    conn.commit()
+    f = get(conn, cur.lastrowid)
+    assert f is not None
+    events.append(conn, "feature", f.id, "created", f.to_dict())
+    return f
+
+
+def get(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature | None:
+    """By id (int) or by name (scoped to project_id, else the active project)."""
+    if isinstance(ref, int) or (isinstance(ref, str) and ref.isdigit()):
+        row = conn.execute("SELECT * FROM features WHERE id = ?", (int(ref),)).fetchone()
+        return Feature.from_row(row) if row else None
+    pid = project_id
+    if pid is None:
+        active = projects.get_active(conn)
+        pid = active.id if active else None
+    if pid is not None:
+        row = conn.execute(
+            "SELECT * FROM features WHERE name = ? AND project_id = ?", (ref, pid)
+        ).fetchone()
+        if row:
+            return Feature.from_row(row)
+    row = conn.execute("SELECT * FROM features WHERE name = ?", (ref,)).fetchone()
+    return Feature.from_row(row) if row else None
+
+
+def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | None = None) -> list[dict]:
+    """Features with their task progress embedded."""
+    clauses, values = [], []
+    if project_id is not None:
+        clauses.append("project_id = ?")
+        values.append(project_id)
+    if status is not None:
+        clauses.append("status = ?")
+        values.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM features {where} ORDER BY created_at DESC, id DESC", values
+    ).fetchall()
+    out = []
+    for r in rows:
+        f = Feature.from_row(r)
+        out.append({**f.to_dict(), "progress": progress(conn, f.id)})
+    return out
+
+
+def attach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: int | None = None) -> Feature:
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    t = tsk.get(conn, task_id)
+    if t is None:
+        raise KeyError(f"no task #{task_id}")
+    tsk.update(conn, task_id, feature_id=f.id)
+    events.append(conn, "feature", f.id, "task_attached", {"task_id": task_id})
+    return f
+
+
+def detach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: int | None = None) -> Feature:
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    t = tsk.get(conn, task_id)
+    if t is not None and t.feature_id == f.id:
+        tsk.update(conn, task_id, feature_id=None)
+    events.append(conn, "feature", f.id, "task_detached", {"task_id": task_id})
+    return f
+
+
+def progress(conn: sqlite3.Connection, feature_id: int) -> dict:
+    rows = tsk.list(conn, feature_id=feature_id, include_cancelled=False)
+    done = [t for t in rows if t.status == "done"]
+    return {
+        "total": len(rows),
+        "done": len(done),
+        "pct": round(100 * len(done) / len(rows), 1) if rows else 0.0,
+        "tasks": [t.to_dict() for t in rows],
+    }
+
+
+def check_completion(conn: sqlite3.Connection, feature_id: int) -> dict:
+    """SIGNAL ONLY — never changes status. True when the feature has tasks and
+    all of them are done (plus optionally linked commits, checked by caller)."""
+    p = progress(conn, feature_id)
+    return {"all_done": p["total"] > 0 and p["done"] == p["total"], **p}
+
+
+def propose(
+    conn: sqlite3.Connection,
+    ref: int | str,
+    project_id: int | None = None,
+    *,
+    source: str = "ai",
+    confidence: float | None = None,
+    reasoning: str | None = None,
+) -> Feature:
+    """Record a proposal (e.g. from the AI) — status becomes 'proposed', NOT done."""
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    if f.status == "done":
+        raise ValueError(f"feature {f.name!r} is already done")
+    conn.execute(
+        "UPDATE features SET status = 'proposed', source = ?, confidence = ?, reasoning = ? WHERE id = ?",
+        (source, confidence, reasoning, f.id),
+    )
+    conn.commit()
+    f = get(conn, f.id)
+    events.append(conn, "feature", f.id, "proposed", f.to_dict())
+    return f
+
+
+def approve(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None, note: str = "") -> Feature:
+    """HUMAN DECISION — the only path to status='done'. Sets validated_at."""
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    if f.status == "done":
+        raise ValueError(f"feature {f.name!r} is already done")
+    now = now_iso()
+    conn.execute(
+        "UPDATE features SET status = 'done', validated_at = ?, feedback = ? WHERE id = ?",
+        (now, note or None, f.id),
+    )
+    conn.commit()
+    f = get(conn, f.id)
+    events.append(conn, "feature", f.id, "validated", {**f.to_dict(), "by": "human", "note": note})
+    return f
+
+
+def reject(conn: sqlite3.Connection, ref: int | str, feedback: str = "", project_id: int | None = None) -> Feature:
+    """Human rejection of a proposal — stored as feedback, never re-proposed blindly."""
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    conn.execute(
+        "UPDATE features SET status = 'rejected', feedback = ? WHERE id = ?",
+        (feedback, f.id),
+    )
+    conn.commit()
+    f = get(conn, f.id)
+    events.append(conn, "feature", f.id, "rejected", {**f.to_dict(), "feedback": feedback})
+    return f
+
+
+def reopen(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature:
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(f"no feature matching {ref!r}")
+    conn.execute(
+        "UPDATE features SET status = 'open', validated_at = NULL, confidence = NULL, reasoning = NULL WHERE id = ?",
+        (f.id,),
+    )
+    conn.commit()
+    f = get(conn, f.id)
+    events.append(conn, "feature", f.id, "reopened", f.to_dict())
+    return f
