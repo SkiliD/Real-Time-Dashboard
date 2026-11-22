@@ -155,7 +155,7 @@ PROVIDER_CATALOG: list[dict] = [
 PROVIDER_IDS = {p["id"] for p in PROVIDER_CATALOG}
 
 #: AI feature flags that can be toggled individually (must match Config.ai_feature_flags keys)
-FEATURE_FLAGS = ("chat", "summarize", "plan", "feature_verdict", "task_verdict")
+FEATURE_FLAGS = ("chat", "summarize", "plan", "suggest", "feature_verdict", "task_verdict")
 
 #: bounds for validated string/int fields coming from the GUI form
 _MAX_FIELD = 500

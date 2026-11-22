@@ -105,6 +105,38 @@ def plan_cmd(
     emit(ctx, r, render)
 
 
+@app.command("suggest", help=tr("ai.suggest.help"))
+def suggest_cmd(
+    ctx: typer.Context,
+    apply: bool = typer.Option(False, "--apply", help=tr("opt.apply_suggest")),
+) -> None:
+    """Analyze the project and propose tickets. --apply creates them (explicit consent)."""
+    r = _run(ctx, assistant.suggest)
+    _cloud_warning(cfgmod.load_config())
+    if apply and r["proposals"]:
+        r2 = _run(ctx, assistant.apply_suggestions, r["proposals"])
+        r["applied"] = True
+        r["created_task_ids"] = r2["created"]
+    else:
+        r["applied"] = False
+        r["created_task_ids"] = []
+
+    def render() -> None:
+        console.print(tr("ai.suggest.title", n=len(r["proposals"])))
+        for i, s in enumerate(r["proposals"], 1):
+            est = tr("ai.plan.est", n=s["estimate_min"]) if s.get("estimate_min") else ""
+            tags = tr("ai.plan.tags", tags=",".join(s.get("tags") or [])) if s.get("tags") else ""
+            reason = f" — {s['reason']}" if s.get("reason") else ""
+            console.print(tr("ai.suggest.item", i=i, title=s.get("title"), est=est, tags=tags, reason=reason))
+        if r["applied"]:
+            console.print(tr("ai.suggest.applied", n=len(r["created_task_ids"]),
+                             ids=", ".join(f"#{i}" for i in r["created_task_ids"])))
+        else:
+            console.print(tr("ai.suggest.not_applied"))
+
+    emit(ctx, r, render)
+
+
 @app.command("verdict", help=tr("ai.verdict.help"))
 def verdict_cmd(
     ctx: typer.Context,

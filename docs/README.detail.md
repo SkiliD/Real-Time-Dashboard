@@ -118,7 +118,10 @@ et un watcher Git scanne les dépôts liés toutes les `git_watch_interval_sec`
 Des endpoints en lecture seule exposent aussi la liste des tags (`GET /api/tags`),
 les dépôts Git liés (`GET /api/git/repos`) et les fichiers de `DEVDASH_HOME`
 (`GET /api/files` : sauvegardes/exports, jamais `config.json`), confinés au
-répertoire home local.
+répertoire home local. `POST /api/fs/pick` ouvre le sélecteur de dossier natif
+de l'OS sur le bureau et renvoie le chemin choisi (ou `null` si annulé) — la
+GUI ne fait que pré-remplir le champ chemin ; connecter un dossier ou lier un
+dépôt reste une action explicite de l'utilisateur.
 
 Onglets : **Tâches** (kanban), **Devlog**, **Git**, **Features**, **Stats**
 (graphiques Chart.js embarqués), **Assistant IA** (visible uniquement si l'IA
@@ -165,6 +168,7 @@ la commande) pour une sortie machine.
 | `ai ask` | `devdash ai ask "où en suis-je ?"` | chat (si IA activée) |
 | `ai summarize` | `devdash ai summarize --period week` | résumé de la semaine |
 | `ai plan` | `devdash ai plan "système de combat" --apply` | découpe en sous-tâches (`--apply` = seule écriture possible) |
+| `ai suggest` | `devdash ai suggest [--apply]` | **analyse tout le projet** et propose des tickets (tâches, priorités, estimations, raisons) — lecture seule, création uniquement via `--apply` (consentement explicite). GUI : bouton « Analyser le projet et proposer des tickets » dans l'onglet IA, cases à cocher + bouton de création ; API : `POST /api/ai/suggest` (propose, n'écrit jamais) puis `POST /api/ai/suggest/apply` (champs whitelistés, re-validés, max 20/appel) |
 | `ai verdict` | `devdash ai verdict dash` | proposition de validation IA (jamais automatique) |
 | `ai verify <id>` | `devdash ai verify 3 [--apply]` | verdict IA sur une tâche (objectif atteint ?) — lecture seule, sauf `--apply` explicite |
 | `demo seed` | `devdash demo seed` | données de démo (`--force` si des projets existent) |

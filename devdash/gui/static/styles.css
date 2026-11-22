@@ -7,6 +7,7 @@
   --text: #e6e8ee;
   --text-dim: #9aa3b2;
   --accent: #6a4fe6; /* was #7c5cff (4.35:1 on white < 4.5 WCAG AA) */
+  --bg-glow: #131722; /* top vignette tint (see body background) */
   --green: #3fb27f;
   --red: #e5534b;
   --yellow: #d9a13b;
@@ -109,11 +110,11 @@ body {
 
 /* modal overlays: ALL modal containers share the fixed centered overlay
    (#modal-edit / #modal-task / #modal-help used to render in page flow) */
-#modal, #modal-edit, #modal-task, #modal-help {
+#modal, #modal-edit, #modal-task, #modal-help, #modal-feat {
   position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.55);
   display: flex; align-items: center; justify-content: center;
 }
-#modal.hidden, #modal-edit.hidden, #modal-task.hidden, #modal-help.hidden { display: none; }
+#modal.hidden, #modal-edit.hidden, #modal-task.hidden, #modal-help.hidden, #modal-feat.hidden { display: none; }
 .modal-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 20px; width: 380px; max-width: 92vw; max-height: 90vh; overflow-y: auto;
@@ -154,10 +155,18 @@ body {
 /* tabs */
 #tabs { display: flex; gap: 4px; padding: 8px 20px 0; border-bottom: 1px solid var(--border); }
 .tab {
-  background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-dim);
+  position: relative; background: none; border: none; color: var(--text-dim);
   padding: 8px 14px; cursor: pointer; font-size: 13px; font-family: var(--font);
+  transition: color .15s ease-out;
 }
-.tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab::after { /* animated underline on the active tab */
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+  background: var(--accent); border-radius: 2px;
+  transform: scaleX(0); transform-origin: left; transition: transform .2s ease-out;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); font-weight: 600; }
+.tab.active::after { transform: scaleX(1); }
 .tab-page { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .tab-page.hidden { display: none; }
 #tab-tasks { overflow: hidden; }
@@ -446,3 +455,175 @@ input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
   border-radius: 6px; padding: 5px 28px 5px 8px; font: inherit;
 }
 select option { background: var(--panel-2); color: var(--text); }
+
+/* native folder-picker button next to a path input (modals, git toolbar) */
+.path-row { display: flex; gap: 8px; }
+.path-row input { flex: 1; min-width: 0; }
+
+/* ---------- AI assistant: typing bubble, meta line, suggestion chips ---------- */
+.chat-msg { display: flex; flex-direction: column; gap: 3px; }
+.chat-body { white-space: pre-wrap; }
+.chat-meta { font-size: 10.5px; color: var(--text-dim); opacity: .8; }
+.chat-msg.error { border-color: var(--red); }
+.chat-msg.error .chat-body { color: #ffb4b4; }
+.chat-msg.typing { flex-direction: row; align-items: center; gap: 8px; font-style: italic; color: var(--text-dim); }
+.chat-msg.typing .dots i {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--text-dim); margin-right: 3px;
+  animation: chatblink 1.2s infinite ease-in-out;
+}
+.chat-msg.typing .dots i:nth-child(2) { animation-delay: .2s; }
+.chat-msg.typing .dots i:nth-child(3) { animation-delay: .4s; }
+.chat-msg.typing .elapsed { font-family: var(--mono); font-size: 11px; font-style: normal; }
+@keyframes chatblink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+.chat-empty { padding: 18px 4px; display: flex; flex-direction: column; gap: 10px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 14px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: var(--font);
+}
+.chip:hover { border-color: var(--accent); }
+button:disabled, input:disabled, select:disabled { opacity: .5; cursor: default; }
+
+/* AI tab: project-analysis button + ticket proposal list (create = explicit consent) */
+#chat-suggest-row { display: flex; gap: 8px; padding: 8px 20px 0; }
+.proposal-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.proposal-item { display: flex; gap: 8px; align-items: baseline; font-size: 13px; cursor: pointer; }
+.proposal-item input { accent-color: var(--accent); }
+.proposal-apply { align-self: flex-start; margin-top: 4px; }
+
+/* ---------- juiciness: depth + micro-interactions (purposeful motion only; the
+   prefers-reduced-motion rule above kills all of it for users who ask) ---------- */
+::selection { background: var(--accent); color: #fff; }
+
+/* one ultra-subtle vignette for depth — single use, hierarchy not decoration */
+body { background: radial-gradient(1100px 700px at 75% -10%, var(--bg-glow) 0%, var(--bg) 60%) fixed; }
+
+/* switching theme (dark/light) fades the big surfaces instead of snapping;
+   elements with their own richer transition (buttons, cards) keep it (later rules win) */
+body, #sidebar, #main, #project-header, #tabs, .tab-page, .col, .settings-card,
+.modal-card, .palette-card, #git-status, #sessions-section {
+  transition: background-color .2s ease-out, border-color .2s ease-out, color .2s ease-out;
+}
+
+/* smooth focus + hover feedback on every control */
+input, select, textarea, button {
+  transition: border-color .15s ease-out, background-color .15s ease-out,
+              color .15s ease-out, opacity .15s ease-out, transform .12s ease-out,
+              filter .15s ease-out;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
+.btn:hover { border-color: var(--accent); }
+.btn-primary:hover { filter: brightness(1.15); }
+.btn:active { transform: scale(.97); }
+*::-webkit-scrollbar-thumb { transition: background-color .15s ease-out; }
+
+/* sidebar: the active project gets a real state marker */
+.project-list li { transition: background-color .15s ease-out, color .15s ease-out; }
+.project-list li.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* brand mark */
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand-mark { flex-shrink: 0; border-radius: 5px; }
+
+/* content lifts slightly on hover */
+.card, .log-entry, .feature-card, #git-commit-list li {
+  transition: border-color .15s ease-out, transform .15s ease-out;
+}
+.card:hover, .log-entry:hover, .feature-card:hover, #git-commit-list li:hover {
+  border-color: #343d4f; transform: translateY(-1px);
+}
+.stat-card { transition: border-color .15s ease-out, transform .15s ease-out; }
+.stat-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+#stat-today { color: var(--accent); } /* key metric gets the one accent */
+.chip:hover { border-color: var(--accent); transform: translateY(-1px); }
+
+/* modals & toast: quick, purposeful entrance (exit is instant) */
+#modal, #modal-edit, #modal-task, #modal-help, #modal-feat, #palette { animation: fadein .15s ease-out; }
+.modal-card, .palette-card { animation: popin .18s ease-out; }
+#toast { animation: toastin .2s ease-out; }
+@keyframes fadein { from { opacity: 0; } }
+@keyframes popin { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes toastin { from { opacity: 0; transform: translateY(10px); } }
+
+/* running session: the timer dot pulses — a real live state, not decoration */
+#session-timer .pulse { display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* ---------- light theme (Settings → Thème → Clair; html[data-theme="light"]) ---------- */
+:root[data-theme="light"] {
+  color-scheme: light; /* native scrollbars/spinners/selects render light too */
+  --bg: #f4f5fa;
+  --bg-glow: #e7e3fa;
+  --panel: #ffffff;
+  --panel-2: #eceef5;
+  --border: #d7dbe7;
+  --text: #1d2330;
+  --text-dim: #5b6474;
+  /* accent #6a4fe6 keeps >= 4.5:1 contrast on white (WCAG AA) */
+}
+/* hardcoded dark surfaces get light variants */
+:root[data-theme="light"] .tag { background: #e2e5ee; }
+:root[data-theme="light"] .prio-critical { background: #f9dcdc; color: #b3352c; }
+:root[data-theme="light"] .prio-high { background: #fbe8d3; color: #96590f; }
+:root[data-theme="light"] .prio-medium { background: #f3ecc9; color: #7a6a1a; }
+:root[data-theme="light"] .prio-low { background: #d9efe3; color: #1f7a4d; }
+:root[data-theme="light"] .cloud-warn,
+:root[data-theme="light"] #ai-banner { background: #fdf3df; color: #8a5a12; }
+:root[data-theme="light"] #toast { background: #fbe4e6; color: #b3352c; }
+:root[data-theme="light"] #toast.ok { background: #e2f4ea; color: #1f7a4d; }
+:root[data-theme="light"] .btn-danger { background: #fbe4e6; color: #b3352c; }
+
+/* ---------- AI assistant tab polish ---------- */
+/* banner as a status bar with a real state dot (local=green, cloud=amber) */
+#ai-banner { display: flex; align-items: center; gap: 8px; }
+.ai-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.ai-dot.local { background: var(--green); }
+.ai-dot.cloud { background: var(--yellow); }
+
+/* who-spoke markers: assistant = accent edge, user = accent fill (existing) */
+.chat-msg.assistant { border-left: 3px solid var(--accent); }
+/* only the newest message animates in (renderChat rebuilds the list on change) */
+.chat-msg:last-child { animation: msgin .18s ease-out; }
+@keyframes msgin { from { opacity: 0; transform: translateY(6px); } }
+
+/* empty state: centered, brand mark on top */
+.chat-empty { align-items: center; text-align: center; padding: 48px 20px 12px; }
+.chat-empty p { font-size: 15px; }
+.chat-empty-mark { margin-bottom: 6px; }
+
+/* ticket proposals read as a real panel, not loose text */
+.proposal-list { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 8px 0 4px; }
+
+/* the "analyse the project" action is THE key action of the tab: outline accent */
+#btn-ai-suggest { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#btn-ai-suggest:hover { background: var(--accent); color: #fff; }
+:root[data-theme="light"] #btn-ai-suggest:hover { color: #fff; }
+
+/* ---------- juiciness round 2: sidebar, kanban, features, stats, palette ---------- */
+/* sidebar: rows nudge right on hover; the "local" dot pulses gently (live state) */
+.project-list li:hover { transform: translateX(2px); }
+.project-list li { transition: background-color .15s ease-out, color .15s ease-out, transform .15s ease-out; }
+#conn-status { display: inline-block; animation: pulse 2.4s ease-in-out infinite; }
+
+/* kanban: count becomes a pill; columns breathe on hover */
+.col h3 .count { background: var(--panel-2); border-radius: 9px; padding: 0 7px; margin-left: 2px; }
+.col { transition: border-color .15s ease-out; }
+.col:hover { border-color: #303949; }
+:root[data-theme="light"] .col:hover { border-color: #c3c9d8; }
+
+/* feature progress bar animates when the value changes (purposeful motion) */
+.feat-progress .bar { transition: width .45s ease-out; }
+
+/* chart boxes get the same hover lift as cards */
+.chart-box { transition: border-color .15s ease-out, transform .15s ease-out; }
+.chart-box:hover { border-color: #343d4f; transform: translateY(-1px); }
+:root[data-theme="light"] .chart-box:hover { border-color: #c3c9d8; }
+
+/* command palette: rows highlight on hover */
+.palette-item { transition: background-color .12s ease-out; }
+.palette-item:hover { background: var(--panel-2); }
+
+/* tags tint on hover */
+.tag { transition: background-color .12s ease-out, color .12s ease-out; }
+.tag:hover { color: var(--text); }

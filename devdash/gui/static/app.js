@@ -48,6 +48,7 @@ const state = {
   statsFilters: { project: "", days: "14", group: "day" }, // "" = active project
   ai: { enabled: false },
   chat: [],
+  aiBusy: null, // {label, started} while an AI call is in flight (typing bubble + locked inputs)
   stats: null,
   aiCfg: null,        // settings form model (GET /api/ai/config)
   aiProviders: [],    // provider catalog (GET /api/ai/providers)
@@ -65,6 +66,14 @@ function T(key, vars) {
   if (vars) for (const k in vars) s = s.split("{" + k + "}").join(String(vars[k]));
   return s;
 }
+/* theme: "dark" (default) | "light" — persisted in config.json, mirrored in
+   localStorage so the saved theme applies before first paint (see index.html) */
+function applyTheme(t) {
+  const theme = t === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("devdash-theme", theme); } catch (e) { /* private mode: config still applies on load */ }
+}
+
 function applyI18n() {
   document.documentElement.lang = I18N.lang;
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = T(el.dataset.i18n); });
@@ -191,9 +200,15 @@ async function loadAiStatus() {
   // AI fully optional: hide the tab entirely when disabled
   $("#tab-ai-btn").classList.toggle("hidden", !state.ai.enabled);
   const banner = $("#ai-banner");
-  if (state.ai.enabled && state.ai.cloud) {
+  if (state.ai.enabled) {
     banner.classList.remove("hidden");
-    banner.textContent = T("gui.ai_banner", { provider: state.ai.provider });
+    banner.textContent = "";
+    const dot = document.createElement("span"); // real state marker: local vs cloud scope
+    dot.className = "ai-dot " + (state.ai.cloud ? "cloud" : "local");
+    banner.appendChild(dot);
+    banner.appendChild(document.createTextNode(state.ai.cloud
+      ? T("gui.ai_banner", { provider: state.ai.provider, model: state.ai.model || "-" })
+      : T("gui.ai_banner_local", { provider: state.ai.provider, model: state.ai.model || "-" })));
   } else {
     banner.classList.add("hidden");
   }
@@ -231,6 +246,7 @@ function fillAiForm() {
   $("#flag-chat").checked = !!fl.chat;
   $("#flag-summarize").checked = !!fl.summarize;
   $("#flag-plan").checked = !!fl.plan;
+  $("#flag-suggest").checked = !!fl.suggest;
   $("#flag-verdict").checked = !!fl.feature_verdict;
   $("#flag-task-verdict").checked = !!fl.task_verdict;
   $("#cfg-path").textContent = T("gui.set.config_path", { path: cfg.config_path || "" });
@@ -259,6 +275,7 @@ function readAiForm() {
     chat: $("#flag-chat").checked,
     summarize: $("#flag-summarize").checked,
     plan: $("#flag-plan").checked,
+    suggest: $("#flag-suggest").checked,
     feature_verdict: $("#flag-verdict").checked,
     task_verdict: $("#flag-task-verdict").checked,
   };
@@ -290,7 +307,10 @@ const LANG_LABELS = { fr: "Français", en: "English" };
 async function loadSettings() {
   try {
     state.settings = await api.get("/api/settings");
-    if (!state.settingsDirty) fillSettingsForm();
+    if (!state.settingsDirty) {
+      fillSettingsForm();
+      applyTheme(state.settings.general && state.settings.general.theme);
+    }
   } catch { /* keep the form as-is on error */ }
 }
 
@@ -306,6 +326,7 @@ function fillSettingsForm() {
   $("#cfg-pomo-break").value = g.pomodoro_break_min;
   $("#cfg-git-watch").value = g.git_watch_interval_sec;
   $("#cfg-port").value = g.gui_port;
+  $("#cfg-theme").value = g.theme || "dark";
   $("#cfg-patterns").value = (g.commit_patterns || []).join("\n");
   $("#set-home").textContent = s.home || "";
 }
@@ -317,6 +338,7 @@ function readGeneralForm() {
     pomodoro_break_min: parseInt($("#cfg-pomo-break").value, 10),
     git_watch_interval_sec: parseInt($("#cfg-git-watch").value, 10),
     gui_port: parseInt($("#cfg-port").value, 10),
+    theme: $("#cfg-theme").value,
     commit_patterns: $("#cfg-patterns").value.split("\n").map((s) => s.trim()).filter(Boolean),
   };
 }
@@ -336,6 +358,9 @@ async function saveAllSettings() {
   state.settings = r.settings;
   state.aiCfg = r.settings.ai;
   state.settingsDirty = false;
+  applyTheme(r.settings.general && r.settings.general.theme); // theme applies hot
+  renderStats._sig = null; // chart colors follow the theme
+  if (state.tab === "stats") renderStats();
   fillSettingsForm();
   fillAiForm();
   $("#cfg-status").textContent = T("gui.set.saved");
@@ -471,7 +496,7 @@ function render() {
   renderPanel("logs", [state.logs, state.logQuery], renderLogs);
   renderPanel("git", [state.gitStatus, state.gitCommits, state.gitUnparsed, state.gitTaskFilter], renderGit);
   renderPanel("features", state.features, renderFeatures);
-  renderPanel("chat", [state.chat, state.ai], renderChat);
+  renderPanel("chat", [state.chat, state.ai, state.aiBusy], renderChat);
   renderPanel("stats", [state.stats, state.statsFilters], renderStats);
   renderPanel("ui", [state.tab, state.filterTag, state.filterPrio, state.taskQuery, state.logQuery,
                      state.gitTaskFilter, state.gitUnparsed, state.statsFilters], saveUi);
@@ -952,12 +977,19 @@ async function renderFeatures() {
         if (act === "reject") await api.post("/api/features/reject", { ref: f.name, feedback: T("gui.feat.reject_feedback") });
         if (act === "reopen") await api.post("/api/features/reopen", { ref: f.name });
         if (act === "verdict") {
-          const r = await api.post("/api/ai/verdict", { ref: f.name });
-          state.chat.push({ role: "assistant",
-            content: T("gui.verdict.chat", { name: f.name,
-              verdict: r.verdict.seems_complete ? T("verdict.complete") : T("verdict.incomplete"),
-              pct: (r.verdict.confidence * 100).toFixed(0) }) + `\n${r.verdict.reasoning}` +
-              (r.proposed ? T("gui.verdict.proposed") : "") });
+          setAiBusy();
+          try {
+            const r = await api.post("/api/ai/verdict", { ref: f.name });
+            state.chat.push({ role: "assistant", time: nowTime(),
+              content: T("gui.verdict.chat", { name: f.name,
+                verdict: r.verdict.seems_complete ? T("verdict.complete") : T("verdict.incomplete"),
+                pct: (r.verdict.confidence * 100).toFixed(0) }) + `\n${r.verdict.reasoning}` +
+                (r.proposed ? T("gui.verdict.proposed") : "") });
+          } catch (e) {
+            state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
+          } finally {
+            clearAiBusy();
+          }
           renderChat();
         }
         await loadAll();
@@ -1085,8 +1117,9 @@ const CHART_COLORS = ["#7c5cff", "#3fb27f", "#d9a13b", "#e5534b", "#38bdf8", "#f
 
 function chartDefaults() {
   if (window.Chart) {
-    Chart.defaults.color = "#9aa3b2";
-    Chart.defaults.borderColor = "#262c38";
+    const cs = getComputedStyle(document.documentElement); // theme-aware (dark/light)
+    Chart.defaults.color = cs.getPropertyValue("--text-dim").trim() || "#9aa3b2";
+    Chart.defaults.borderColor = cs.getPropertyValue("--border").trim() || "#262c38";
     Chart.defaults.font.family = "Segoe UI, system-ui, sans-serif";
   }
 }
@@ -1154,70 +1187,190 @@ function renderStats() {
 
 /* ---------- AI assistant ---------- */
 
+const nowTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+const AI_BUSY_IDS = ["#btn-chat-send", "#chat-input", "#btn-chat-week", "#btn-chat-context", "#btn-plan", "#plan-input", "#btn-ai-suggest"];
+
+/* While a provider call is in flight: typing bubble + live elapsed timer in the
+   chat log, and the AI inputs are locked so nothing is sent twice. */
+function setAiBusy(label) {
+  state.aiBusy = { label: label || T("gui.ai.busy"), started: Date.now() };
+  for (const id of AI_BUSY_IDS) { const el = $(id); if (el) el.disabled = true; }
+  renderChat();
+}
+function clearAiBusy() {
+  state.aiBusy = null;
+  for (const id of AI_BUSY_IDS) { const el = $(id); if (el) el.disabled = false; }
+  renderChat();
+}
+// live "Xs" counter on the typing bubble (cheap: a handful of nodes, once per second)
+setInterval(() => {
+  document.querySelectorAll(".chat-msg.typing").forEach((b) => {
+    const el = b.querySelector(".elapsed");
+    if (el && b.dataset.started) el.textContent = Math.floor((Date.now() - Number(b.dataset.started)) / 1000) + "s";
+  });
+}, 1000);
+
+function chatEmptyState() {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-empty";
+  wrap.innerHTML = '<svg class="brand-mark chat-empty-mark" width="34" height="34" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#6a4fe6"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>'; // static markup only
+  const p = document.createElement("p");
+  p.className = "dim";
+  p.textContent = T("gui.chat.welcome");
+  wrap.appendChild(p);
+  const row = document.createElement("div");
+  row.className = "chip-row";
+  const chip = (label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.textContent = label;
+    b.onclick = () => runAction(fn);
+    row.appendChild(b);
+  };
+  chip(T("gui.chat.suggest_status"), () => { $("#chat-input").value = T("gui.chat.suggest_status"); chatSend(); });
+  chip(T("gui.chat.week_user"), chatWeek);
+  chip(T("gui.chat.suggest_plan"), () => { $("#plan-input").focus(); });
+  wrap.appendChild(row);
+  return wrap;
+}
+
 function renderChat() {
   const box = $("#chat-log");
   box.innerHTML = "";
+  if (!state.chat.length && !state.aiBusy) box.appendChild(chatEmptyState());
   for (const m of state.chat) {
     const div = document.createElement("div");
-    div.className = "chat-msg " + m.role;
-    div.textContent = m.content;
+    div.className = "chat-msg " + m.role + (m.error ? " error" : "");
+    const body = document.createElement("div");
+    body.className = "chat-body";
+    body.textContent = m.content; // textContent: chat text is never injected as HTML
+    div.appendChild(body);
+    if (m.proposals) {
+      // ticket proposals from the project analysis: checkboxes + a create button
+      // that only fires on an explicit user click (consent), never automatically
+      const list = document.createElement("div");
+      list.className = "proposal-list";
+      m.proposals.forEach((p, i) => {
+        const row = document.createElement("label");
+        row.className = "proposal-item";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !m.applied;
+        cb.disabled = !!m.applied;
+        cb.dataset.idx = String(i);
+        const txt = document.createElement("span");
+        txt.textContent = p.title
+          + (p.estimate_min ? ` (~${p.estimate_min} min)` : "")
+          + (p.priority && p.priority !== "medium" ? ` · ${p.priority}` : "")
+          + (p.tags && p.tags.length ? ` · #${p.tags.join(" #")}` : "")
+          + (p.reason ? ` — ${p.reason}` : "");
+        row.append(cb, txt);
+        list.appendChild(row);
+      });
+      div.appendChild(list);
+      if (!m.applied) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-sm btn-primary proposal-apply";
+        btn.textContent = T("gui.suggest.create_btn", { n: m.proposals.length });
+        btn.onclick = () => runAction(() => applyProposalMsg(m, list));
+        div.appendChild(btn);
+      } else {
+        const tag = document.createElement("div");
+        tag.className = "dim small";
+        tag.textContent = T("gui.suggest.applied_tag");
+        div.appendChild(tag);
+      }
+    }
+    const meta = document.createElement("div");
+    meta.className = "chat-meta";
+    meta.textContent = [m.role === "user" ? T("gui.chat.you") : T("gui.chat.ai"), m.time, m.meta].filter(Boolean).join(" · ");
+    div.appendChild(meta);
+    box.appendChild(div);
+  }
+  if (state.aiBusy) {
+    const div = document.createElement("div");
+    div.className = "chat-msg assistant typing";
+    div.dataset.started = String(state.aiBusy.started);
+    const lbl = document.createElement("span");
+    lbl.textContent = state.aiBusy.label;
+    const dots = document.createElement("span");
+    dots.className = "dots";
+    dots.innerHTML = "<i></i><i></i><i></i>"; // static markup only
+    const el = document.createElement("span");
+    el.className = "elapsed";
+    el.textContent = "0s";
+    div.append(lbl, dots, el);
     box.appendChild(div);
   }
   box.scrollTop = box.scrollHeight;
 }
 
 async function chatSend() {
+  if (state.aiBusy) return; // a call is already in flight
   const input = $("#chat-input");
   const q = input.value.trim();
   if (!q) return;
   input.value = "";
-  state.chat.push({ role: "user", content: q });
+  state.chat.push({ role: "user", content: q, time: nowTime() });
   renderChat();
+  setAiBusy();
   try {
     const r = await api.post("/api/ai/ask", { question: q });
-    state.chat.push({ role: "assistant", content: r.answer + `\n(${r.provider}/${r.model})` });
+    state.chat.push({ role: "assistant", content: r.answer,
+      meta: [r.provider, r.model, r.cloud ? "cloud" : null].filter(Boolean).join(" / "), time: nowTime() });
   } catch (e) {
-    state.chat.push({ role: "assistant", content: "⚠ " + e.message });
+    state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
+  } finally {
+    clearAiBusy();
   }
-  renderChat();
 }
 
 async function chatWeek() {
-  state.chat.push({ role: "user", content: T("gui.chat.week_user") });
+  if (state.aiBusy) return;
+  state.chat.push({ role: "user", content: T("gui.chat.week_user"), time: nowTime() });
   renderChat();
+  setAiBusy();
   try {
     const r = await api.post("/api/ai/summarize", {});
-    state.chat.push({ role: "assistant", content: r.summary });
+    state.chat.push({ role: "assistant", content: r.summary,
+      meta: [r.provider, r.cloud ? "cloud" : null].filter(Boolean).join(" / "), time: nowTime() });
   } catch (e) {
-    state.chat.push({ role: "assistant", content: "⚠ " + e.message });
+    state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
+  } finally {
+    clearAiBusy();
   }
-  renderChat();
 }
 
 async function chatContext() {
   // local-only preview: shows exactly what a provider would receive
   try {
     const r = await api.get("/api/ai/context");
-    state.chat.push({ role: "assistant",
+    state.chat.push({ role: "assistant", time: nowTime(),
       content: `📋 ${T("ai.context.line", { chars: r.chars, max: r.max_chars, provider: r.provider || "-", cloud: r.cloud })}\n\n${r.context}` });
   } catch (e) {
-    state.chat.push({ role: "assistant", content: "⚠ " + e.message });
+    state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
   }
   renderChat();
 }
 
 async function chatPlan(apply) {
+  if (state.aiBusy) return;
   const input = $("#plan-input");
   const title = input.value.trim();
   if (!title) return;
+  setAiBusy(T("gui.ai.busy_plan"));
   try {
     const r = await api.post("/api/ai/plan", { title, apply });
     const lines = r.proposal.map((s, i) => `${i + 1}. ${s.title}${s.estimate_min ? ` (~${s.estimate_min}min)` : ""}`).join("\n");
     state.chat.push({
       role: "assistant",
+      time: nowTime(),
       content: (r.applied
         ? T("gui.plan.applied", { n: r.created_task_ids.length, ids: r.created_task_ids.map((i) => "#" + i).join(", ") })
-        : T("gui.plan.proposed", { lines })) ,
+        : T("gui.plan.proposed", { lines })),
     });
     if (!r.applied) {
       // remember the pending proposal for the confirm button, but never render
@@ -1229,12 +1382,54 @@ async function chatPlan(apply) {
       $("#btn-plan").textContent = T("gui.plan_btn");
       input.value = "";
     }
-    renderChat();
-    await loadAll();
   } catch (e) {
-    state.chat.push({ role: "assistant", content: "⚠ " + e.message });
-    renderChat();
+    state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
+  } finally {
+    clearAiBusy();
   }
+  renderChat();
+  await loadAll();
+}
+
+/* Project analysis -> ticket proposals (read-only). Creation goes through
+   applyProposalMsg, which the user triggers explicitly via the create button. */
+async function aiSuggest() {
+  if (state.aiBusy) return;
+  setAiBusy(T("gui.ai.busy_suggest"));
+  try {
+    const r = await api.post("/api/ai/suggest", {});
+    state.chat.push({ role: "assistant", time: nowTime(),
+      content: r.proposals.length ? T("gui.suggest.proposed", { n: r.proposals.length }) : T("gui.suggest.none"),
+      proposals: r.proposals, rejected: r.rejected,
+      meta: [r.provider, r.cloud ? "cloud" : null].filter(Boolean).join(" / ") });
+  } catch (e) {
+    state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
+  } finally {
+    clearAiBusy();
+  }
+}
+
+async function applyProposalMsg(m, listEl) {
+  if (state.aiBusy) return;
+  const tasks = [];
+  listEl.querySelectorAll(".proposal-item input:checked").forEach((cb) => {
+    const p = m.proposals[Number(cb.dataset.idx)];
+    if (p) tasks.push({ title: p.title, description: p.description, priority: p.priority,
+                        estimate_min: p.estimate_min, tags: p.tags });
+  });
+  if (!tasks.length) return;
+  setAiBusy(T("gui.ai.busy_create"));
+  try {
+    const r = await api.post("/api/ai/suggest/apply", { tasks }); // explicit consent: the click above
+    m.applied = true;
+    state.chat.push({ role: "assistant", time: nowTime(),
+      content: T("gui.suggest.created", { n: r.count, ids: r.created.map((i) => "#" + i).join(", ") }) });
+  } catch (e) {
+    state.chat.push({ role: "assistant", error: true, content: e.message, time: nowTime() });
+  } finally {
+    clearAiBusy();
+  }
+  await loadAll();
 }
 
 /* ---------- error surfacing: a failed action must never look like "nothing happened" ---------- */
@@ -1448,6 +1643,19 @@ $("#f-path").addEventListener("input", () => {
   clearTimeout(detectTimer);
   detectTimer = setTimeout(() => runAction(detectFolder), 400); // debounce
 });
+
+/* native OS folder picker (server-side dialog): pre-fills the input, the user
+   still confirms the link/connect explicitly */
+async function browsePathInto(inputSel, titleKey) {
+  const r = await api.post("/api/fs/pick", { title: T(titleKey) });
+  if (r && r.path) {
+    const el = $(inputSel);
+    el.value = r.path;
+    el.dispatchEvent(new Event("input", { bubbles: true })); // re-triggers the folder auto-detect debounce
+  }
+}
+$("#btn-browse-fpath").onclick = () => runAction(() => browsePathInto("#f-path", "gui.pick_folder"));
+$("#btn-browse-gitpath").onclick = () => runAction(() => browsePathInto("#git-path", "gui.pick_repo"));
 $("#btn-cancel-modal").onclick = closeModal;
 $("#btn-create-project").onclick = () => runAction(createProject);
 $("#btn-cancel-edit").onclick = closeEditModal;
@@ -1492,7 +1700,11 @@ $("#btn-delete-task").onclick = () => {
 $("#btn-task-verify").onclick = () => runAction(async () => {
   const id = state.editingTaskId;
   if (id == null) return;
-  const r = await api.post("/api/ai/task_verdict", { id });
+  const btn = $("#btn-task-verify");
+  btn.disabled = true;
+  $("#task-verdict-result").textContent = T("gui.ai.busy");
+  try {
+    const r = await api.post("/api/ai/task_verdict", { id });
   const v = r.verdict;
   state.taskVerdict = v;
   const t = state.tasks.find((x) => x.id === id);
@@ -1502,6 +1714,9 @@ $("#btn-task-verify").onclick = () => runAction(async () => {
   // the approve button is shown only for a positive verdict on an unfinished task
   $("#btn-task-verify-approve").classList.toggle("hidden",
     !(v.seems_complete && t && t.status !== "done" && t.status !== "cancelled"));
+  } finally {
+    btn.disabled = false;
+  }
 });
 $("#btn-task-verify-approve").onclick = () => runAction(async () => {
   const id = state.editingTaskId;
@@ -1552,7 +1767,13 @@ $("#btn-chat-send").onclick = () => runAction(chatSend);
 $("#chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(chatSend); });
 $("#btn-chat-week").onclick = () => runAction(chatWeek);
 $("#btn-chat-context").onclick = () => runAction(chatContext);
+$("#btn-ai-suggest").onclick = () => runAction(aiSuggest);
 $("#cfg-provider").onchange = () => { updateProviderFields(); state.settingsDirty = true; };
+$("#cfg-theme").onchange = () => { // live preview, saved with the rest of the form
+  applyTheme($("#cfg-theme").value);
+  renderStats._sig = null;
+  if (state.tab === "stats") renderStats();
+};
 document.querySelectorAll("#tab-settings input, #tab-settings select, #tab-settings textarea").forEach((el) =>
   el.addEventListener("input", () => { state.settingsDirty = true; }));
 $("#btn-ai-save").onclick = () => runAction(saveAllSettings);

@@ -6,6 +6,10 @@ HTTP server). All methods return plain dicts/lists (JSON-serializable).
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,6 +30,32 @@ class ApiError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def _folder_picker_command(title: str, platform: str | None = None) -> list[str] | None:
+    """OS-native folder-picker command (stdlib subprocess only — the HTTP server
+    thread must not touch tkinter). Prints the chosen path on stdout, nothing
+    when cancelled. `platform` is injectable for tests."""
+    plat = platform or sys.platform
+    if plat == "win32":
+        # -Sta: FolderBrowserDialog needs an STA thread; title via env var to
+        # avoid any quoting issue in the PowerShell snippet
+        return ["powershell", "-NoProfile", "-Sta", "-Command",
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                "$d.Description = $env:DEVDASH_PICK_TITLE; "
+                "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }"]
+    if plat == "darwin":
+        return ["osascript", "-e",
+                "on run argv\n"
+                'tell application "System Events" to activate\n'
+                "set p to choose folder with prompt (item 1 of argv)\n"
+                "POSIX path of p\n"
+                "end run",
+                "--", title]
+    if shutil.which("zenity"):
+        return ["zenity", "--file-selection", "--directory", f"--title={title}"]
+    return None
 
 
 class Api:
@@ -434,6 +464,7 @@ class Api:
                 "pomodoro_break_min": cfg.pomodoro_break_min,
                 "git_watch_interval_sec": cfg.git_watch_interval_sec,
                 "gui_port": cfg.gui_port,
+                "theme": cfg.theme,
                 "commit_patterns": list(cfg.commit_patterns),
             },
         }
@@ -460,6 +491,7 @@ class Api:
                 "pomodoro_break_min": cfg.pomodoro_break_min,
                 "git_watch_interval_sec": cfg.git_watch_interval_sec,
                 "gui_port": cfg.gui_port,
+                "theme": cfg.theme,
                 "commit_patterns": list(cfg.commit_patterns),
             },
         }, "status": self.ai_status()}
@@ -577,6 +609,26 @@ class Api:
             raise ApiError("title is required")
         # apply=True is the explicit human consent (GUI confirm button)
         return self._ai_call(assistant.plan, title, apply=bool(body.get("apply")))
+
+    def ai_suggest(self, body: dict) -> dict:
+        """Analyze the project and propose tickets. READ-ONLY: never creates anything."""
+        return self._ai_call(assistant.suggest)
+
+    def ai_suggest_apply(self, body: dict) -> dict:
+        """Create tickets from AI proposals — EXPLICIT human consent only: the GUI
+        calls this solely from the "create checked tickets" button. Every item is
+        re-validated server-side before touching the DB (whitelisted fields)."""
+        items = body.get("tasks")
+        if not isinstance(items, list) or not items:
+            raise ApiError("tasks is required (non-empty list)")
+        if len(items) > assistant.MAX_SUGGEST_APPLY:
+            raise ApiError(f"too many tasks at once (max {assistant.MAX_SUGGEST_APPLY})")
+        clean = []
+        for it in items:
+            if not isinstance(it, dict):
+                raise ApiError("each task must be an object")
+            clean.append({k: it.get(k) for k in ("title", "description", "priority", "estimate_min", "tags")})
+        return self._ai_call(assistant.apply_suggestions, clean)
 
     def ai_verdict(self, body: dict) -> dict:
         ref = body.get("ref")
@@ -794,6 +846,29 @@ class Api:
                         out[key].append({"name": f.name, "bytes": st.st_size,
                                          "path": str(f)})
         return out
+
+    # --- filesystem: native folder picker -----------------------------------
+
+    def fs_pick_directory(self, body: dict) -> dict:
+        """Open the OS folder picker on the desktop where the server runs.
+
+        Returns {"path": str | null} (null = cancelled). The GUI only pre-fills
+        the path input with the result — the user still confirms the link, so
+        this endpoint never connects a project or a repo by itself.
+        """
+        title = self._str(body, "title") or "Select a folder"
+        if len(title) > 120:
+            raise ApiError("title is too long")
+        cmd = _folder_picker_command(title)
+        if cmd is None:
+            raise ApiError("no folder picker available on this platform")
+        env = dict(os.environ, DEVDASH_PICK_TITLE=title)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
+        except (OSError, subprocess.TimeoutExpired):
+            raise ApiError("folder picker could not be started")
+        lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+        return {"path": lines[-1] if lines else None}
 
     def git_ignore(self, body: dict) -> dict:
         """Add/refresh the marker-delimited DevDash block in the linked repo's

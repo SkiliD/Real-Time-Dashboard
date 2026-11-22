@@ -312,3 +312,100 @@ def test_api_features_update_and_delete(api):
     with pytest.raises(ApiError) as e:
         api.features_delete({"ref": "air-dash"})
     assert e.value.status == 404
+
+
+# --- native folder picker (POST /api/fs/pick) ----------------------------------
+
+
+def test_folder_picker_command_per_platform():
+    from devdash.gui.api import _folder_picker_command
+    w = _folder_picker_command("t", platform="win32")
+    assert w and w[0] == "powershell" and any("FolderBrowserDialog" in p for p in w)
+    m = _folder_picker_command("t", platform="darwin")
+    assert m and m[0] == "osascript" and any("choose folder" in p for p in m)
+    ln = _folder_picker_command("t", platform="linux")
+    assert ln is None or ln[0] == "zenity"  # depends on zenity being installed
+
+
+def test_api_fs_pick_directory(monkeypatch, api):
+    from devdash.gui import api as apimod
+
+    class _R:
+        def __init__(self, stdout):
+            self.stdout = stdout
+            self.returncode = 0
+
+    monkeypatch.setattr(apimod.subprocess, "run", lambda *a, **k: _R("/home/danny/Games/aether-vale\n"))
+    assert api.fs_pick_directory({"title": "x"}) == {"path": "/home/danny/Games/aether-vale"}
+    monkeypatch.setattr(apimod.subprocess, "run", lambda *a, **k: _R(""))
+    assert api.fs_pick_directory({}) == {"path": None}  # cancelled dialog
+    with pytest.raises(ApiError) as e:
+        api.fs_pick_directory({"title": "x" * 200})
+    assert e.value.status == 400
+
+
+def test_fs_pick_route_registered():
+    from devdash.gui import server
+    assert "/api/fs/pick" in server.POST_ROUTES
+
+
+# --- AI project analysis -> ticket proposals (creation needs explicit consent) --
+
+
+def test_feature_flags_include_suggest():
+    from devdash.core.ai import FEATURE_FLAGS
+    from devdash.core.config import Config
+    assert "suggest" in FEATURE_FLAGS
+    assert Config().ai_feature_flags.get("suggest") is True
+
+
+def test_api_ai_suggest_then_apply(api, home):
+    import json as _json
+    (home / "config.json").write_text(_json.dumps(
+        {"ai_enabled": True, "ai_provider": "mock", "ai_model": "mock"}), encoding="utf-8")
+    r = api.ai_suggest({})
+    assert len(r["proposals"]) == 3  # read-only: proposes only, never writes
+    r2 = api.ai_suggest_apply({"tasks": r["proposals"]})  # explicit consent path
+    assert r2["count"] == 3 and len(r2["created"]) == 3
+    with pytest.raises(ApiError) as e:
+        api.ai_suggest_apply({"tasks": [{"title": "x", "priority": "ultra"}]})
+    assert e.value.status == 400
+    with pytest.raises(ApiError):
+        api.ai_suggest_apply({"tasks": "nope"})
+    with pytest.raises(ApiError):
+        api.ai_suggest_apply({"tasks": [{"title": f"t{i}"} for i in range(25)]})
+
+
+def test_ai_suggest_routes_registered():
+    from devdash.gui import server
+    assert "/api/ai/suggest" in server.POST_ROUTES
+    assert "/api/ai/suggest/apply" in server.POST_ROUTES
+
+
+def test_gui_server_falls_back_when_port_busy(home):
+    # a busy port (stale instance / other service) must not kill the GUI:
+    # _bind_server falls back to a free port and warns
+    import threading
+    from devdash.gui.desktop import _bind_server
+    from devdash.gui.server import make_server
+    srv1 = make_server(port=0, home=home)
+    busy_port = srv1.server_address[1]
+    threading.Thread(target=srv1.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
+    srv2, warn = _bind_server(busy_port, home=home)
+    assert srv2.server_address[1] != busy_port and warn and "in use" in warn
+    srv2.server_close()          # never served: shutdown() would block forever
+    srv1.shutdown(); srv1.server_close()
+
+
+# --- light/dark theme setting ---------------------------------------------------
+
+
+def test_theme_setting_validated_and_saved(api, home):
+    from devdash.core import config as cfgmod
+    assert api.settings_get()["general"]["theme"] == "dark"  # default
+    r = api.settings_save({"theme": "light"})
+    assert r["settings"]["general"]["theme"] == "light"
+    assert cfgmod.load_config(home).theme == "light"  # persisted in config.json
+    with pytest.raises(ApiError) as e:
+        api.settings_save({"theme": "neon"})
+    assert e.value.status == 400

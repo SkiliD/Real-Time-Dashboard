@@ -118,7 +118,10 @@ SQLite event bus every 1.5 s and a Git watcher scans linked repos every
 without restarting. Read-only endpoints also expose the tag list (`GET /api/tags`),
 the linked Git repos (`GET /api/git/repos`) and the files in `DEVDASH_HOME`
 (`GET /api/files`: backups/exports, never `config.json`), confined to the local
-home directory.
+home directory. `POST /api/fs/pick` opens the OS-native folder picker on the
+desktop and returns the chosen path (or `null` if cancelled) — the GUI only
+pre-fills the path input; connecting a folder or linking a repo stays an
+explicit user action.
 
 Tabs: **Tasks** (kanban), **Devlog**, **Git**, **Features**, **Stats** (embedded
 Chart.js charts), **AI Assistant** (only visible when AI is enabled), **Settings**
@@ -164,6 +167,7 @@ for machine-readable output.
 | `ai ask` | `devdash ai ask "where do I stand?"` | chat (if AI enabled) |
 | `ai summarize` | `devdash ai summarize --period week` | weekly summary |
 | `ai plan` | `devdash ai plan "combat system" --apply` | breaks down into subtasks (`--apply` = the only possible write) |
+| `ai suggest` | `devdash ai suggest [--apply]` | **analyzes the whole project** and proposes tickets (tasks, priorities, estimates, reasons) — read-only, creation only via `--apply` (explicit consent). GUI: "Analyse the project and propose tickets" button in the AI tab, with checkboxes + a create button; API: `POST /api/ai/suggest` (propose, never writes) then `POST /api/ai/suggest/apply` (whitelisted fields, re-validated, max 20/call) |
 | `ai verdict` | `devdash ai verdict dash` | AI validation proposal (never automatic) |
 | `ai verify <id>` | `devdash ai verify 3 [--apply]` | AI verdict on a task (objective met?) — read-only, except explicit `--apply` |
 | `demo seed` | `devdash demo seed` | demo data (`--force` if projects already exist) |

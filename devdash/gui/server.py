@@ -83,6 +83,8 @@ POST_ROUTES = {
     "/api/ai/ask": lambda api, body: api.ai_ask(body),
     "/api/ai/summarize": lambda api, body: api.ai_summarize(body),
     "/api/ai/plan": lambda api, body: api.ai_plan(body),
+    "/api/ai/suggest": lambda api, body: api.ai_suggest(body),
+    "/api/ai/suggest/apply": lambda api, body: api.ai_suggest_apply(body),
     "/api/ai/verdict": lambda api, body: api.ai_verdict(body),
     "/api/ai/task_verdict": lambda api, body: api.ai_task_verdict(body),
     "/api/ai/config": lambda api, body: api.ai_config_save(body),
@@ -91,6 +93,7 @@ POST_ROUTES = {
     "/api/backup": lambda api, body: api.backup_now(body),
     "/api/export": lambda api, body: api.export_now(body),
     "/api/demo/seed": lambda api, body: api.demo_seed(body),
+    "/api/fs/pick": lambda api, body: api.fs_pick_directory(body),
     "/api/update/check": lambda api, body: api.update_check(body),
     "/api/update": lambda api, body: api.update_now(body),
 }

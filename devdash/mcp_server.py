@@ -91,6 +91,7 @@ TOOLS = [
     _tool("devdash_features_list", "List features of the active project with progress."),
     _tool("devdash_ai_ask", "Ask the AI assistant (only when ai_enabled=true in config.json).",
           {"question": {"type": "string"}}, ["question"]),
+    _tool("devdash_ai_suggest", "Analyze the active project and propose tickets (READ-ONLY: never creates tasks; creation needs explicit human consent via the GUI/CLI --apply)."),
     _tool("devdash_task_verify", "AI verdict on a task (is its objective met? read-only, never marks done).",
           {"id": {"type": "integer"}}, ["id"]),
 ]
@@ -212,6 +213,14 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
         from .core.ai.provider import AIDisabledError, AIError
         try:
             return assistant.ask(conn, args["question"], home=home)
+        except (AIDisabledError, AIError) as e:
+            raise AIError(str(e)) from e
+    if name == "devdash_ai_suggest":
+        from .core.ai import assistant
+        from .core.ai.provider import AIDisabledError, AIError
+        try:
+            # read-only on purpose: an agent NEVER creates tickets by itself
+            return assistant.suggest(conn, home=home)
         except (AIDisabledError, AIError) as e:
             raise AIError(str(e)) from e
     if name == "devdash_task_verify":

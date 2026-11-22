@@ -72,6 +72,40 @@ def test_plan_propose_then_apply(home, conn, project):
     assert len(tasks.list(conn, project_id=project.id)) == 3
 
 
+def test_suggest_proposes_never_writes(home, conn, project):
+    enable_mock_ai(home)
+    r = assistant.suggest(conn, home=home)
+    assert len(r["proposals"]) == 3 and r["provider"] == "mock"
+    # READ-ONLY: nothing is written without explicit consent
+    assert len(tasks.list(conn, project_id=project.id)) == 0
+
+
+def test_suggest_apply_creates_with_consent(home, conn, project):
+    enable_mock_ai(home)
+    r = assistant.suggest(conn, home=home)
+    r2 = assistant.apply_suggestions(conn, r["proposals"], home=home)
+    assert r2["count"] == 3 and len(r2["created"]) == 3
+    assert len(tasks.list(conn, project_id=project.id)) == 3
+
+
+def test_suggest_apply_validates_and_caps(home, conn, project):
+    enable_mock_ai(home)
+    from devdash.core.ai.provider import AIError
+    with pytest.raises(AIError):
+        assistant.apply_suggestions(conn, [{"title": "x", "priority": "ultra"}], home=home)
+    with pytest.raises(AIError):
+        assistant.apply_suggestions(conn, [], home=home)
+    with pytest.raises(AIError):
+        assistant.apply_suggestions(conn, [{"title": f"t{i}"} for i in range(25)], home=home)
+    assert len(tasks.list(conn, project_id=project.id)) == 0  # nothing written on refusal
+
+
+def test_suggest_flag_off(home, conn, project):
+    enable_mock_ai(home, ai_feature_flags={"suggest": False})
+    with pytest.raises(AIDisabledError):
+        assistant.suggest(conn, home=home)
+
+
 def test_verdict_proposes_never_done(home, conn, project):
     enable_mock_ai(home)
     f = features.create(conn, project.id, "dash")

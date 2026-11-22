@@ -48,8 +48,8 @@ class Config:
     ai_cli_command: str = ""         # for ai_provider="cli": e.g. "llama-cli -m model.gguf --no-display"
     ai_context_max_chars: int = 6000  # max size of the compact context sent to the model
     ai_feature_flags: dict = field(default_factory=lambda: {
-        "chat": True, "summarize": True, "plan": True, "feature_verdict": True,
-        "task_verdict": True,
+        "chat": True, "summarize": True, "plan": True, "suggest": True,
+        "feature_verdict": True, "task_verdict": True,
     })
 
     # --- git commit message parsing ---
@@ -64,6 +64,7 @@ class Config:
 
     # --- GUI ---
     gui_port: int = 8765
+    theme: str = "dark"  # "dark" | "light"
 
 
 def devdash_home() -> Path:
@@ -99,6 +100,7 @@ _KEY_TYPES: dict[str, tuple[type, ...]] = {
     "pomodoro_break_min": (int,),
     "git_watch_interval_sec": (int,),
     "gui_port": (int,),
+    "theme": (str,),
 }
 
 
@@ -184,6 +186,12 @@ def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) 
         if not isinstance(lang, str) or lang not in allowed_langs:
             raise ValueError(f"lang must be one of: {', '.join(allowed_langs)}")
         cfg.lang = lang
+
+    if "theme" in data and data["theme"] not in (None, ""):
+        theme = data["theme"]
+        if theme not in ("dark", "light"):
+            raise ValueError("theme must be 'dark' or 'light'")
+        cfg.theme = theme
 
     for key, (lo, hi) in _INT_BOUNDS.items():
         if key not in data or data[key] in (None, ""):

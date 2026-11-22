@@ -45,6 +45,18 @@ TASK_VERDICT_SYSTEM = (
 # apply=True (explicit --apply consent) only marks a task done above this confidence
 VERDICT_APPLY_MIN_CONFIDENCE = 0.7
 
+SUGGEST_SYSTEM = (
+    "Tu es l'assistant d'un développeur solo. On te donne le contexte compact d'un projet "
+    "(tâches ouvertes, features, devlog, git, stats). Analyse ce projet et propose des "
+    "tickets concrets, à petit scope, actionnables, qui font avancer le projet — sans doublon "
+    "avec les tâches déjà ouvertes. "
+    "Réponds UNIQUEMENT un JSON valide: "
+    '{"tasks": [{"title": str, "description": str|null, "priority": "low"|"medium"|"high"|"critical", '
+    '"estimate_min": int|null, "tags": [str], "reason": str}]} — 3 à 8 tickets max, en français.'
+)
+MAX_SUGGEST_TASKS = 8      # proposals kept from one analysis
+MAX_SUGGEST_APPLY = 20     # hard cap on tickets created in one consented call
+
 
 def _cfg_and_provider(home: Path | None):
     cfg = cfgmod.load_config(home)
@@ -191,6 +203,96 @@ def plan(conn: sqlite3.Connection, title: str, apply: bool = False, home: Path |
             result["created_task_ids"].append(t.id)
         result["applied"] = True
     return result
+
+
+def _valid_task_proposal(sub) -> tuple[bool, str]:
+    """Validate one AI-proposed ticket before it can ever touch the DB."""
+    ok, reason = _valid_subtask(sub)
+    if not ok:
+        return False, reason
+    if len(sub["title"].strip()) > 200:
+        return False, "title too long"
+    if sub.get("priority", "medium") not in tsk.VALID_PRIORITIES:
+        return False, "invalid priority"
+    est = sub.get("estimate_min")
+    if est is not None and est > 10000:
+        return False, "estimate too large"
+    tags = sub.get("tags") or []
+    if len(tags) > 10 or any(not isinstance(t, str) or len(t) > 40 for t in tags):
+        return False, "tags invalid"
+    return True, ""
+
+
+def suggest(conn: sqlite3.Connection, home: Path | None = None) -> dict:
+    """Analyze the project and PROPOSE tickets. READ-ONLY: never writes anything.
+    Ticket creation happens only via apply_suggestions() = explicit human consent."""
+    cfg, provider = _cfg_and_provider(home)
+    _flag(cfg, "suggest", home)
+    active = projects.get_active(conn)
+    if active is None:
+        raise AIDisabledError(i18n.tr("ai.no_active", home=home))
+    ctx = ctx_mod.build_context(conn, max_chars=cfg.ai_context_max_chars)
+    repo = gitwatch.get_link(conn, active.id)
+    recent_commits = []
+    if repo:
+        recent_commits = [c.message[:120] for c in gitwatch.commits(conn, repo_path=repo, limit=15)]
+    payload = {"contexte": ctx, "commits_récents": recent_commits}
+    messages = [
+        {"role": "system", "content": SUGGEST_SYSTEM},
+        {"role": "user", "content": "Analyse ce projet et propose des tickets:\n"
+                                   + json.dumps(payload, ensure_ascii=False)},
+    ]
+    raw = provider.chat(messages, temperature=0.4)
+    data = _extract_json(raw, home)
+    raw_tasks = data.get("tasks", [])
+    if not isinstance(raw_tasks, list):
+        raw_tasks = []
+    proposals, rejected = [], []
+    for sub in raw_tasks[:MAX_SUGGEST_TASKS]:
+        ok, reason = _valid_task_proposal(sub)
+        if ok:
+            proposals.append({
+                "title": sub["title"].strip(),
+                "description": sub.get("description")[:500] if isinstance(sub.get("description"), str) else "",
+                "priority": sub.get("priority") or "medium",
+                "estimate_min": sub.get("estimate_min"),
+                "tags": [t for t in (sub.get("tags") or []) if isinstance(t, str)],
+                "reason": sub.get("reason")[:300] if isinstance(sub.get("reason"), str) else "",
+            })
+        else:
+            rejected.append(reason)
+    return {"proposals": proposals, "rejected": rejected,
+            "provider": provider.name, "cloud": ai_status(cfg)["cloud"]}
+
+
+def apply_suggestions(conn: sqlite3.Connection, items, home: Path | None = None) -> dict:
+    """Create tickets from AI proposals. ONLY called with explicit human consent
+    (CLI --apply, or the GUI "create selected" button after the user ticked the
+    proposals). Every item is re-validated here before touching the DB; each
+    tsk.add appends its event in the same transaction."""
+    if not isinstance(items, list) or not items:
+        raise AIError("no task to create")
+    if len(items) > MAX_SUGGEST_APPLY:
+        raise AIError(f"too many tasks at once (max {MAX_SUGGEST_APPLY})")
+    cfg = cfgmod.load_config(home)
+    _flag(cfg, "suggest", home)
+    active = projects.get_active(conn)
+    if active is None:
+        raise AIDisabledError(i18n.tr("ai.no_active", home=home))
+    created = []
+    for it in items:
+        if not isinstance(it, dict):
+            raise AIError("invalid task proposal: not an object")
+        ok, reason = _valid_task_proposal(it)
+        if not ok:
+            raise AIError(f"invalid task proposal: {reason}")
+        t = tsk.add(conn, active.id, it["title"].strip(),
+                    description=(it.get("description") or "")[:500],
+                    priority=it.get("priority") or "medium",
+                    estimate_min=it.get("estimate_min"),
+                    tags=it.get("tags") or [])
+        created.append(t.id)
+    return {"created": created, "count": len(created)}
 
 
 def feature_verdict(conn: sqlite3.Connection, ref, home: Path | None = None) -> dict:

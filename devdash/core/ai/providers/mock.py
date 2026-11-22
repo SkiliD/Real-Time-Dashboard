@@ -28,6 +28,16 @@ class MockProvider(AIProvider):
                 "confidence": 0.8,
                 "reasoning": "[mock] toutes les tâches liées sont terminées et des commits feat(...) existent",
             }, ensure_ascii=False)
+        if "propose des tickets" in user:
+            return json.dumps({"tasks": [
+                {"title": "[mock] ticket: refactoriser le module input", "description": "dette technique",
+                 "priority": "medium", "estimate_min": 60, "tags": ["refacto"],
+                 "reason": "code dupliqué repéré dans le contexte"},
+                {"title": "[mock] ticket: tests du dash", "priority": "high", "estimate_min": 45,
+                 "tags": ["tests"], "reason": "feature dash sans tests"},
+                {"title": "[mock] ticket: documenter les contrôles", "priority": "low", "estimate_min": 15,
+                 "tags": ["docs"], "reason": "section manquante dans le README"},
+            ]}, ensure_ascii=False)
         if "subtasks" in user:
             title = user.split("titre:", 1)[-1].strip().splitlines()[0][:60] if "titre:" in user else "tâche"
             return json.dumps({"subtasks": [

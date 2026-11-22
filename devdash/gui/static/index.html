@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DevDash</title>
+  <script>/* apply the saved theme before first paint (no flash of the wrong theme) */
+    try { document.documentElement.dataset.theme = localStorage.getItem("devdash-theme") || "dark"; }
+    catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -20,7 +23,7 @@
 
   <aside id="sidebar">
 
-    <div class="brand">Dev<span>Dash</span></div>
+    <div class="brand"><svg class="brand-mark" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#6a4fe6"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>Dev<span>Dash</span></div>
     <button id="btn-new-project" class="btn btn-primary btn-block" data-i18n="gui.new_project">+ Nouveau projet</button>
     <ul id="project-list" class="project-list"></ul>
     <div class="sidebar-footer"><span data-i18n="gui.local">local · </span><span id="conn-status">●</span></div>
@@ -120,6 +123,7 @@
     <section id="tab-git" class="tab-page hidden">
       <div id="git-toolbar">
         <input id="git-path" type="text" data-i18n-ph="gui.git_path_ph" placeholder="Chemin du dépôt Git local…">
+        <button id="btn-browse-gitpath" type="button" class="btn btn-sm" data-i18n="gui.browse">Parcourir…</button>
         <button id="btn-git-link" class="btn btn-sm" data-i18n="gui.git_link">Lier le dépôt</button>
         <button id="btn-git-unlink" class="btn btn-sm" data-i18n="gui.git_unlink">Délier</button>
         <button id="btn-git-sync" class="btn btn-sm" data-i18n="gui.git_sync">↻ Sync</button>
@@ -147,6 +151,9 @@
       <div id="chat-plan-row">
         <input id="plan-input" type="text" data-i18n-ph="gui.plan_ph" placeholder="Grosse tâche à découper… (ex. : système de dash)">
         <button id="btn-plan" class="btn btn-sm" data-i18n="gui.plan_btn">Proposer un plan</button>
+      </div>
+      <div id="chat-suggest-row">
+        <button id="btn-ai-suggest" class="btn btn-sm" data-i18n="gui.ai.suggest_btn">Analyser le projet et proposer des tickets</button>
       </div>
       <div id="chat-input-row">
         <input id="chat-input" type="text" data-i18n-ph="gui.chat_ph" placeholder="Poser une question à l’assistant… (Entrée)">
@@ -195,6 +202,7 @@
           <label class="chk"><input type="checkbox" id="flag-chat"> <span data-i18n="gui.set.flag.chat">Chat</span></label>
           <label class="chk"><input type="checkbox" id="flag-summarize"> <span data-i18n="gui.set.flag.summarize">Résumé de semaine</span></label>
           <label class="chk"><input type="checkbox" id="flag-plan"> <span data-i18n="gui.set.flag.plan">Découpage de tâches</span></label>
+          <label class="chk"><input type="checkbox" id="flag-suggest"> <span data-i18n="gui.set.flag.suggest">Propositions de tickets (analyse du projet)</span></label>
           <label class="chk"><input type="checkbox" id="flag-verdict"> <span data-i18n="gui.set.flag.feature_verdict">Verdict sur les features</span></label>
           <label class="chk"><input type="checkbox" id="flag-task-verdict"> <span data-i18n="gui.set.flag.task_verdict">Verdict sur les tâches</span></label>
         </fieldset>
@@ -216,6 +224,13 @@
         <div class="field">
           <label for="cfg-lang" data-i18n="gui.set.lang">Langue de l’interface</label>
           <select id="cfg-lang"></select>
+        </div>
+        <div class="field">
+          <label for="cfg-theme" data-i18n="gui.set.theme">Thème</label>
+          <select id="cfg-theme">
+            <option value="dark" data-i18n="gui.set.theme.dark">Sombre</option>
+            <option value="light" data-i18n="gui.set.theme.light">Clair</option>
+          </select>
         </div>
         <div class="field-row">
           <div class="field">
@@ -376,7 +391,8 @@
   <div class="modal-card">
     <h3 data-i18n="gui.modal.title">Nouveau projet</h3>
     <label><span data-i18n="gui.modal.path">Dossier existant à connecter (optionnel)</span>
-      <input id="f-path" type="text" data-i18n-ph="gui.modal.path_ph" placeholder="C:\projets\mon-jeu…">
+      <div class="path-row"><input id="f-path" type="text" data-i18n-ph="gui.modal.path_ph" placeholder="C:\projets\mon-jeu…">
+ <button id="btn-browse-fpath" type="button" class="btn btn-sm" data-i18n="gui.browse">Parcourir…</button></div>
     </label>
     <p class="dim small" id="f-detect"></p>
     <label><span data-i18n="gui.modal.name">Nom</span> <input id="f-name" type="text" placeholder="Aether Vale"></label>
