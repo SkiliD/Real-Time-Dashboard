@@ -3,6 +3,7 @@
 DevDash est un petit **tableau de bord personnel qui vit sur ton ordinateur**, pour
 t'aider à suivre tes projets — dev de jeux, web, ou autre. Il montre tes tâches, le
 temps que tu travailles, tes notes et ce que disent tes commits Git, au même endroit.
+Je l'ai fait pour mes propres projets de jeu — s'il colle aussi au tien, tant mieux.
 
 Il y a une **ligne de commande** pour les actions rapides et une **application de
 bureau** pour le reste. Les deux partagent les mêmes données : ce que tu fais dans
@@ -66,6 +67,15 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[gui,test]"
 ```
 
+La fenêtre native (PyWebView) a besoin d'un paquet système sur **Linux** — WebKit2GTK :
+```bash
+# Debian/Ubuntu :  sudo apt install python3-gi gir1.2-webkit2-4.1
+# Fedora :         sudo dnf install webkit2gtk4.1 python3-gobject
+# Arch :           sudo pacman -S webkit2gtk python-gobject
+```
+Sur **macOS** rien de plus n'est requis. Sur un serveur sans écran (headless), utilise
+`devdash gui --browser` — la même appli dans ton navigateur.
+
 Ou sans environnement virtuel : `pipx install .`
 
 > **Windows — note AppLocker/WDAC** : si `devdash` échoue avec « Une stratégie de contrôle
@@ -81,12 +91,25 @@ Alias pratique (optionnel) : `alias dd='devdash'` dans ton `~/.bashrc` / `~/.zsh
 
 ```bash
 pip install -e ".[build]"
-py -3 scripts/build_exe.py        # -> dist/devdash.exe (Windows) / dist/devdash (macOS/Linux)
+py -3 scripts/build_exe.py        # -> dist/devdash/devdash.exe (Windows) / dist/devdash/ (macOS/Linux)
 ```
 
-Compile-le sur l'OS où tu vas l'utiliser. Le résultat tient en un seul fichier
-double-cliquable — mets-le sur une clé USB si tu veux. (`--onedir` pour un dossier,
-`--no-gui` pour un exécutable CLI seul, plus léger.)
+Compile-le sur l'OS où tu vas l'utiliser. Le résultat est un dossier contenant un
+exécutable double-cliquable — mets le dossier sur une clé USB si tu veux.
+Options : `--onefile` pour un seul fichier, `--no-gui` pour un exécutable CLI seul,
+`--no-console` pour une exe fenêtrée (pas de flash de console).
+
+> **SmartScreen Windows / antivirus** : l'exe n'est *pas signé*, le premier lancement
+> peut afficher « Windows a protégé votre PC » → clique sur **Informations
+> complémentaires → Exécuter quand même**. Le build est conçu pour être discret
+> (dossier onedir au lieu d'un onefile auto-extractible, UPX désactivé, métadonnées
+> de version Windows + manifeste `asInvoker` embarqués), mais seul un *certificat de
+> signature de code de confiance* supprime l'avertissement pour de bon :
+> `.\scripts\sign_exe.ps1 -ExePath "dist\devdash\devdash.exe"`.
+> DevDash est 100 % local : pas de compte, pas de télémétrie, aucun appel réseau
+> sauf un `git fetch` ou un provider IA que tu déclenches toi-même. Pour mettre
+> le dossier en liste blanche dans Defender : *Sécurité Windows → Protection contre
+> les virus → Exclusions → ajoute le dossier `dist\devdash`*.
 
 ## Premiers pas
 

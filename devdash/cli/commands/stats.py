@@ -1,5 +1,3 @@
-"""`devdash stats ...` commands: time, tasks, streak, tags."""
-
 from __future__ import annotations
 
 import typer

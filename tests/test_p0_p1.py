@@ -1,6 +1,4 @@
-"""Tests for stats window coherence, event pruning, GUI error
-toast presence, task --feature filter, backup command, ai_context_max_chars,
-pomodoro auto-break."""
+"""tests -- p0 p1"""
 
 from __future__ import annotations
 

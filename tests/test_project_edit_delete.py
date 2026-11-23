@@ -1,9 +1,4 @@
-"""GUI project editing + deletion: update name/engine/color/status via the API,
-hard delete with cascade, active-project reassignment, HTTP end-to-end.
-
-Deletion is an explicit human action (the GUI uses a two-step confirm button);
-the core cascades via ON DELETE CASCADE and never deletes anything else.
-"""
+"""tests -- project edit delete"""
 
 from __future__ import annotations
 

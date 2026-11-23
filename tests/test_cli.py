@@ -1,6 +1,6 @@
-"""CLI tests: projects + tasks commands, human and --json output.
+"""tests -- cli
 
-Uses typer's CliRunner with an isolated DEVDASH_HOME per test.
+Small on purpose -- it has to stay fast.
 """
 
 from __future__ import annotations

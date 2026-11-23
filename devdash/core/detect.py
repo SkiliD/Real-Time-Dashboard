@@ -1,12 +1,4 @@
-"""Connect DevDash to an EXISTING project folder on disk.
-
-Pure filesystem probing (read-only): detect the engine from well-known marker
-files, suggest a project name from the folder name, and walk up the tree to
-find the enclosing git repository (so `git link` can be done automatically).
-
-Used by `devdash projects connect <path>` (CLI) and POST /api/projects/connect
-(GUI "connect a folder" flow).
-"""
+"""attach an existing folder on disk as a project"""
 
 from __future__ import annotations
 

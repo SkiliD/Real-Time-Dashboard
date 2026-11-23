@@ -1,8 +1,6 @@
-"""Work sessions + Pomodoro support (core).
+"""work sessions and durations
 
-A session is attached to a project and optionally to a task. Only ONE session
-runs at a time: starting a new one auto-stops the running one (recorded with
-an empty note), which keeps the timeline clean for a solo developer.
+If it breaks, the tests will say so.
 """
 
 from __future__ import annotations

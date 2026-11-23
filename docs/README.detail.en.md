@@ -38,6 +38,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[gui,test]"
 ```
 
+Linux only — the native window (PyWebView) also needs the system WebKit2GTK package:
+```bash
+# Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1
+# Fedora:        sudo dnf install webkit2gtk4.1 python3-gobject
+# Arch:          sudo pacman -S webkit2gtk python-gobject
+```
+macOS needs nothing extra. Headless (no display)? `devdash gui --browser`.
+
 No-venv variant (user install):
 
 ```bash
@@ -66,9 +74,14 @@ PyInstaller builds a single double-clickable binary:
 
 ```bash
 pip install -e ".[build]"            # adds pyinstaller
-py -3 scripts/build_exe.py           # -> dist/devdash.exe (Windows) / dist/devdash (macOS, Linux)
-py -3 scripts/build_exe.py --onedir  # folder build (faster startup, easier to whitelist with antivirus)
+py -3 scripts/build_exe.py           # -> onedir folder dist/devdash/devdash.exe (default, AV-friendlier)
+py -3 scripts/build_exe.py --onefile # single-file dist/devdash.exe (handier to share)
 py -3 scripts/build_exe.py --no-gui  # CLI-only exe (smaller, no pywebview)
+py -3 scripts/build_exe.py --no-console  # windowed exe (no console) for double-click GUI use
+# SmartScreen (unsigned exe): "More info > Run anyway".
+# To remove the warning with a trusted cert: .\scripts\sign_exe.ps1 -ExePath "dist\devdash\devdash.exe"
+# The build embeds Windows version metadata (scripts/version_info.txt) and an
+# asInvoker/DPI manifest (scripts/app.manifest); UPX is disabled.
 ```
 
 - **Build on the target OS** (a PyInstaller exe is not cross-platform).
@@ -118,7 +131,8 @@ SQLite event bus every 1.5 s and a Git watcher scans linked repos every
 without restarting. Read-only endpoints also expose the tag list (`GET /api/tags`),
 the linked Git repos (`GET /api/git/repos`) and the files in `DEVDASH_HOME`
 (`GET /api/files`: backups/exports, never `config.json`), confined to the local
-home directory. `POST /api/fs/pick` opens the OS-native folder picker on the
+home directory. `POST /api/features/propose` (read-only too: AI proposals
+awaiting human approval). `POST /api/fs/pick` opens the OS-native folder picker on the
 desktop and returns the chosen path (or `null` if cancelled) — the GUI only
 pre-fills the path input; connecting a folder or linking a repo stays an
 explicit user action.
@@ -146,6 +160,8 @@ for machine-readable output.
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | status change |
 | `task edit <id>` | `devdash task edit 3 --priority critical --tag vfx` | edit |
 | `task delete <id>` | `devdash task delete 3 --yes` | permanent delete (subtasks cascade) |
+
+Projects also have a **color** (it themes the UI while the project is active) and **languages** (`--lang csharp --lang gdscript`, editable in the GUI): `devdash projects create "My Game" --engine unity --lang csharp`.
 | `session start` | `devdash session start --task 3 --kind focus --pomodoro` | interactive timer; `--background` to return the prompt, `--pomodoro` = after focus, offers to auto-start the break |
 | `session stop` | `devdash session stop --note "done: X, blocked: Y"` | duration + end note |
 | `session now` / `session list` | `devdash session list --week` | running session / history (`--today`, `--week`, `-t <task id>`) |
@@ -244,10 +260,11 @@ command = "devdash"
 args = ["mcp"]
 ```
 
-Exposed tools: `devdash_status`, `devdash_projects_list`, `devdash_tasks_list`,
-`devdash_task_add`, `devdash_task_set_status`, `devdash_session_start/stop`,
-`devdash_log_add/search`, `devdash_stats`, `devdash_git_status/log`,
-`devdash_features_list`, `devdash_ai_ask` (if AI is enabled).
+Exposed tools (16): `devdash_status`, `devdash_projects_list`, `devdash_tasks_list`,
+`devdash_task_add`, `devdash_task_set_status`, `devdash_task_verify`,
+`devdash_session_start/stop`, `devdash_log_add/search`, `devdash_stats`,
+`devdash_git_status/log`, `devdash_features_list`, `devdash_ai_ask`,
+`devdash_ai_suggest` (if AI is enabled).
 Same rule everywhere: **no destructive action**, read-only git, and a feature is
 **never** marked done by the agent.
 

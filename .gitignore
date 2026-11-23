@@ -83,3 +83,6 @@ desktop.ini
 devdash-backup-*.zip
 devdash-export-*.json
 .devdash-snapshot-*.db
+
+# Personal working notes: local only, never committed/pushed
+/backlog.md

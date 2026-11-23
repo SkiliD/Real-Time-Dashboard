@@ -1,8 +1,4 @@
-"""GUI tests: the JSON Api directly + the HTTP server end-to-end.
-
-pywebview itself (the native window) is not tested here; the server and API
-are what matter, and both GUI modes share them.
-"""
+"""tests -- gui"""
 
 from __future__ import annotations
 

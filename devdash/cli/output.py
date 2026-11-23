@@ -1,8 +1,4 @@
-"""Output helpers: human (rich) by default, machine (--json) on demand.
-
-Every command calls `emit(ctx, data, render)` where `data` is the JSON-
-serializable payload and `render()` prints the pretty human version.
-"""
+"""rich by default, --json when scripting"""
 
 from __future__ import annotations
 

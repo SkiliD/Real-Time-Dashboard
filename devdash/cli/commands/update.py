@@ -1,9 +1,4 @@
-"""`devdash update` — update DevDash easily after a pull (or another install mode).
-
-  devdash update           apply the update (git pull --ff-only + dep refresh)
-  devdash update --check   only report whether an update is available
-  devdash update status    install mode + local git info (no network)
-"""
+# devdash update -- run this after a git pull
 
 from __future__ import annotations
 

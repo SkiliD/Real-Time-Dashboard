@@ -1,9 +1,3 @@
-"""Tasks CRUD, filters, subtasks and status transitions.
-
-Solo-focus rule: starting a task moves the project's other in_progress tasks
-back to todo, so there is at most one "in progress" task per project.
-"""
-
 from __future__ import annotations
 
 import json

@@ -1,22 +1,3 @@
-"""Minimal MCP (Model Context Protocol) server for DevDash — stdlib only.
-
-Speaks JSON-RPC 2.0 over stdio, newline-delimited (the MCP stdio transport):
-each line on stdin is one request/notification, each response is one line on
-stdout. Logs go to stderr only, never stdout (stdout is the protocol channel).
-
-Run with:  devdash mcp
-Configure in Claude Code (project `.mcp.json`):
-    { "mcpServers": { "devdash": { "command": "devdash", "args": ["mcp"] } } }
-Configure in Vibe (`~/.vibe/config.toml` or project `.vibe/`):
-    [mcp_servers.devdash]
-    command = "devdash"
-    args = ["mcp"]
-
-Safety rules (same as the rest of DevDash): read-only git, no destructive
-action exposed, AI tools only when ai_enabled=true, and a feature is NEVER
-marked done by the agent — only proposed/approved by a human in DevDash.
-"""
-
 from __future__ import annotations
 
 import json
@@ -34,6 +15,7 @@ PROTOCOL_VERSION = "2024-11-05"
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 MAX_SEARCH_LIMIT = 200
+MAX_TITLE_LEN = 100_000  # same cap as the GUI API (_str max_len)
 
 # one DB connection per stdio process (the loop is single-threaded)
 _CONN = None
@@ -147,7 +129,12 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
             est = int(est)  # ValueError on garbage -> clean isError
             if est < 0:
                 raise ValueError("estimate_min must be >= 0")
-        t = tsk.add(conn, proj.id, args["title"],
+        title = args.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("title is required")
+        if len(title) > MAX_TITLE_LEN:
+            raise ValueError(f"title too long (max {MAX_TITLE_LEN} chars)")
+        t = tsk.add(conn, proj.id, title,
                     priority=args.get("priority", "medium"),
                     estimate_min=est,
                     tags=args.get("tags") or [])

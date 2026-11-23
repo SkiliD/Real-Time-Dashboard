@@ -1,8 +1,4 @@
-"""JSON API exposed by the GUI server. Thin wrapper over devdash.core.
-
-One short-lived SQLite connection per call (thread-safe with the threading
-HTTP server). All methods return plain dicts/lists (JSON-serializable).
-"""
+# REST endpoints consumed by app.js
 
 from __future__ import annotations
 
@@ -58,6 +54,21 @@ def _folder_picker_command(title: str, platform: str | None = None) -> list[str]
     return None
 
 
+def _general_block(cfg, home) -> dict:
+    """The non-AI part of the settings payload (shared by get and save)."""
+    from devdash.core import i18n
+    return {
+        "lang": i18n.get_lang(home),
+        "langs": list(i18n.SUPPORTED_LANGS),
+        "pomodoro_focus_min": cfg.pomodoro_focus_min,
+        "pomodoro_break_min": cfg.pomodoro_break_min,
+        "git_watch_interval_sec": cfg.git_watch_interval_sec,
+        "gui_port": cfg.gui_port,
+        "theme": cfg.theme,
+        "commit_patterns": list(cfg.commit_patterns),
+    }
+
+
 class Api:
     def __init__(self, home: Path | None = None):
         self.home = home  # None -> resolved from DEVDASH_HOME at call time
@@ -98,6 +109,16 @@ class Api:
         if hi is not None:
             n = max(1, min(hi, n))
         return n
+
+    @staticmethod
+    def _str_list(body: dict, key: str) -> list[str] | None:
+        """Fetch an optional list[str] field; wrong type is a clean 400."""
+        if key not in body or body[key] is None:
+            return None
+        v = body[key]
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise ApiError(f"invalid {key}: expected a list of strings")
+        return v
 
     @staticmethod
     def _str(body: dict, key: str, default: str = "", required: bool = False, max_len: int = 100_000) -> str:
@@ -158,6 +179,7 @@ class Api:
                     engine=self._str(body, "engine", "other") or "other",
                     color=self._str(body, "color", "#8a8f98") or "#8a8f98",
                     status=self._str(body, "status", "idea") or "idea",
+                    languages=self._str_list(body, "languages"),
                 )
                 if body.get("set_active"):
                     proj.set_active(c, p.id)
@@ -186,6 +208,7 @@ class Api:
                     engine=body.get("engine"), color=body.get("color"),
                     status=body.get("status"),
                     archived=body.get("archived"),
+                    languages=self._str_list(body, "languages"),
                 )
             except KeyError:
                 raise ApiError(f"no project matching {ref!r}", status=404)
@@ -224,6 +247,7 @@ class Api:
                     engine=engine,
                     color=self._str(body, "color", "#8a8f98") or "#8a8f98",
                     status=self._str(body, "status", "idea") or "idea",
+                    languages=self._str_list(body, "languages"),
                 )
             except ValueError as e:
                 raise ApiError(str(e))
@@ -450,23 +474,13 @@ class Api:
 
     def settings_get(self) -> dict:
         """Full public settings: AI block (key write-only) + general block."""
-        from devdash.core import i18n
         from devdash.core.ai import public_ai_config
         cfg = config.load_config(self.home)
         home = self.home or config.devdash_home()
         return {
             "home": str(home),
             "ai": public_ai_config(cfg, home=home),
-            "general": {
-                "lang": i18n.get_lang(home),
-                "langs": list(i18n.SUPPORTED_LANGS),
-                "pomodoro_focus_min": cfg.pomodoro_focus_min,
-                "pomodoro_break_min": cfg.pomodoro_break_min,
-                "git_watch_interval_sec": cfg.git_watch_interval_sec,
-                "gui_port": cfg.gui_port,
-                "theme": cfg.theme,
-                "commit_patterns": list(cfg.commit_patterns),
-            },
+            "general": _general_block(cfg, home),
         }
 
     def settings_save(self, body: dict) -> dict:
@@ -484,16 +498,7 @@ class Api:
         return {"saved": True, "settings": {
             "home": str(home),
             "ai": public_ai_config(cfg, home=home),
-            "general": {
-                "lang": i18n.get_lang(home),
-                "langs": list(i18n.SUPPORTED_LANGS),
-                "pomodoro_focus_min": cfg.pomodoro_focus_min,
-                "pomodoro_break_min": cfg.pomodoro_break_min,
-                "git_watch_interval_sec": cfg.git_watch_interval_sec,
-                "gui_port": cfg.gui_port,
-                "theme": cfg.theme,
-                "commit_patterns": list(cfg.commit_patterns),
-            },
+            "general": _general_block(cfg, home),
         }, "status": self.ai_status()}
 
     def _confined_out(self, body: dict | None, default_subdir: str):
@@ -550,6 +555,27 @@ class Api:
         if not (body or {}).get("confirm"):
             raise ApiError("update requires confirm=true (two-step in the GUI)", status=400)
         return updater.update(reinstall=bool((body or {}).get("reinstall", True)))
+
+    def open_home(self, body: dict | None = None) -> dict:
+        """Reveal DEVDASH_HOME in the OS file explorer. The folder is only opened
+        when the client explicitly sends open=true (GUI button); otherwise the
+        endpoint just returns the path."""
+        import os
+        import subprocess
+        import sys
+
+        home = Path(self.home or config.devdash_home()).resolve()
+        if (body or {}).get("open"):
+            try:
+                if sys.platform == "win32" and hasattr(os, "startfile"):
+                    os.startfile(home)  # type: ignore[attr-defined]
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", str(home)])
+                else:
+                    subprocess.Popen(["xdg-open", str(home)])
+            except OSError as e:
+                raise ApiError(f"cannot open folder: {e}")
+        return {"path": str(home)}
 
     def demo_seed(self, body: dict) -> dict:
         """Seed demo data from the GUI. Refuses when projects already exist
@@ -993,6 +1019,24 @@ class Api:
                 limit=self._int(query.get("limit"), "limit", 50, hi=Api.MAX_LIST_LIMIT),
             )
             return {"count": len(rows), "sessions": [r.to_dict() for r in rows]}
+
+    def sessions_minutes(self, query: dict) -> dict:
+        """Aggregated per-task minutes (active project by default): the kanban
+        time badges need totals, not hundreds of session rows on every poll."""
+        with self._conn() as c:
+            pid = self._list_pid(c, query)
+            if pid is None:
+                rows = c.execute(
+                    "SELECT task_id, COALESCE(SUM(duration_min), 0) AS m FROM sessions "
+                    "WHERE task_id IS NOT NULL GROUP BY task_id"
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT task_id, COALESCE(SUM(duration_min), 0) AS m FROM sessions "
+                    "WHERE project_id = ? AND task_id IS NOT NULL GROUP BY task_id",
+                    (pid,),
+                ).fetchall()
+            return {"minutes": {r["task_id"]: r["m"] for r in rows}}
 
     # --- status / events (realtime) ----------------------------------------
 

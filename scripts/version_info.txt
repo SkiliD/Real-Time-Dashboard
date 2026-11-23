@@ -1,0 +1,34 @@
+# UTF-8
+#
+# Windows version resource embedded into devdash.exe by PyInstaller.
+# Legitimate metadata (product name, company, description, copyright) makes the
+# binary look like a normal application in Explorer > Properties and helps
+# SmartScreen/antivirus reputation heuristics.
+#
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 1, 0, 0),
+    prodvers=(0, 1, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0, 0, 0, 0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904B0',
+        [StringStruct('CompanyName', 'DevDash'),
+         StringStruct('FileDescription', 'DevDash - portable local dev dashboard (CLI + native GUI)'),
+         StringStruct('FileVersion', '0.1.0.0'),
+         StringStruct('InternalName', 'devdash'),
+         StringStruct('LegalCopyright', 'MIT License'),
+         StringStruct('OriginalFilename', 'devdash.exe'),
+         StringStruct('ProductName', 'DevDash'),
+         StringStruct('ProductVersion', '0.1.0.0')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)

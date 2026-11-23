@@ -1,1 +1,3 @@
-"""DevDash CLI (typer). Thin shell over devdash.core -- no business logic here."""
+# typer app -- a thin shell over devdash.core
+# Read-only on purpose.
+

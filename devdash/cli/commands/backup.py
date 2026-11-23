@@ -1,8 +1,6 @@
-"""`devdash backup` — one-command, timestamped zip backup of DEVDASH_HOME.
+"""devdash backup -- zip of the whole devdash home
 
-The DB snapshot uses SQLite's online backup API, so it is consistent even
-while the GUI is running. The zip contains devdash.db + config.json (the API
-keys stay inside the backup — it is a LOCAL file, treat it accordingly).
+Small on purpose -- it has to stay fast.
 """
 
 from __future__ import annotations

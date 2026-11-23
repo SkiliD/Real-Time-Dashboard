@@ -1,4 +1,7 @@
-"""`devdash task ...` commands."""
+"""devdash task ...
+
+Small on purpose -- it has to stay fast.
+"""
 
 from __future__ import annotations
 

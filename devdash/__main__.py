@@ -1,4 +1,4 @@
-"""Allow `python -m devdash ...`."""
+"""python -m devdash"""
 
 from devdash.cli.main import entrypoint
 

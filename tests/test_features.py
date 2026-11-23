@@ -1,7 +1,5 @@
-"""Feature tests: grouping, progress, and the ABSOLUTE RULE —
-a feature becomes 'done' only via an explicit human decision; check_completion
-is a signal and never mutates status. Rejected proposals keep feedback.
-"""
+# tests -- features
+# Read-only on purpose.
 
 from __future__ import annotations
 

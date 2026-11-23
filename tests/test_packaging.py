@@ -1,9 +1,5 @@
-"""Packaging tests: the standalone-executable build must stay wired correctly.
-
-We do NOT run PyInstaller here (heavy); we assert the packaging contract:
-entry point, package data (schema.sql), build extra, spec file, and that
-`python -m devdash` (the exe's entry) works.
-"""
+# tests -- packaging
+# Read-only on purpose.
 
 from __future__ import annotations
 
@@ -42,6 +38,41 @@ def test_pyinstaller_spec_is_wired():
     assert "upx=False" in spec
 
 
+def test_spec_is_av_friendly():
+    # onedir by default (no self-extracting onefile), Windows metadata + manifest wired
+    spec = (ROOT / "devdash.spec").read_text(encoding="utf-8")
+    assert "DEVDASH_ONEFILE" in spec and "exclude_binaries=True" in spec  # onedir default
+    assert "version_info.txt" in spec and "app.manifest" in spec
+    assert "COLLECT(" in spec
+
+
+def test_windows_version_metadata_present():
+    v = (ROOT / "scripts" / "version_info.txt").read_text(encoding="utf-8")
+    for field in ["ProductName", "FileDescription", "CompanyName", "LegalCopyright",
+                  "OriginalFilename", "FileVersion"]:
+        assert field in v, field
+    assert "DevDash" in v
+
+
+def test_app_manifest_is_as_invoker_and_dpi_aware():
+    m = (ROOT / "scripts" / "app.manifest").read_text(encoding="utf-8")
+    assert 'level="asInvoker"' in m          # no UAC prompt for a local tool
+    assert "PerMonitorV2" in m               # crisp GUI on high-DPI
+    assert "Common-Controls" in m
+
+
+def test_sign_script_exists():
+    s = (ROOT / "scripts" / "sign_exe.ps1").read_text(encoding="utf-8")
+    assert "signtool" in s and "sign" in s and "/fd" in s
+
+
+def test_readmes_document_smart_screen():
+    for f in ["README.md", "README.fr.md"]:
+        txt = (ROOT / f).read_text(encoding="utf-8")
+        low = txt.lower()
+        assert "smartscreen" in low and "sign_exe.ps1" in txt, f
+
+
 def test_build_script_exists_and_is_runnable_help():
     script = ROOT / "scripts" / "build_exe.py"
     assert script.is_file()
@@ -50,7 +81,8 @@ def test_build_script_exists_and_is_runnable_help():
         capture_output=True, text=True, cwd=ROOT,
     )
     assert proc.returncode == 0
-    assert "--onedir" in proc.stdout and "--no-gui" in proc.stdout
+    # onedir is now the DEFAULT (AV-friendlier); --onefile opts back in
+    assert "--onefile" in proc.stdout and "--no-gui" in proc.stdout and "--no-console" in proc.stdout
 
 
 def test_python_m_devDash_entrypoint_works():

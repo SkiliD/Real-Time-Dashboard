@@ -1,8 +1,4 @@
-"""AI task verdict (`ai verify` / /api/ai/task_verdict / MCP devdash_task_verify).
-
-Safety contract tested here: the verdict is read-only by default; apply=True
-marks done ONLY on a confident positive verdict; the GUI endpoint never applies.
-"""
+# tests -- task verdict
 
 from __future__ import annotations
 

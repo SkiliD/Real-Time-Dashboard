@@ -1,6 +1,5 @@
-"""Tests for the 2026-11 audit fixes: input validation (400 not 500), core guards,
-SQLite busy_timeout, i18n duplicate keys, ReDoS pattern rejection, cross-project
-attach, atomic sessions, MCP bounds."""
+# tests -- audit fixes
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 

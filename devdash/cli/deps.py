@@ -1,7 +1,6 @@
-"""Shared CLI dependencies: one SQLite connection per command invocation.
+"""one sqlite connection per command + the guard() error boundary
 
-The DB lives in DEVDASH_HOME (default ~/.devdash) and is auto-initialized on
-first use, so there is no separate `init` step to remember.
+If it breaks, the tests will say so.
 """
 
 from __future__ import annotations

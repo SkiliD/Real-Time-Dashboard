@@ -1,8 +1,6 @@
-"""SQLite connection + schema bootstrap for the DevDash core.
+"""sqlite connection, WAL, schema bootstrap + migrations
 
-Stdlib only. One database file (devdash.db) inside DEVDASH_HOME, so the whole
-app state is a single portable file. WAL mode allows the CLI and the GUI to
-read/write concurrently without locking each other out.
+If it breaks, the tests will say so.
 """
 
 from __future__ import annotations
@@ -10,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -55,6 +53,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
 
 
+# sqlite has no "ADD COLUMN IF NOT EXISTS" on older versions, hence this dance
 def _migrate(conn: sqlite3.Connection) -> None:
     """Additive migrations for databases created by older versions.
 
@@ -96,6 +95,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         sync_cols = {r["name"] for r in conn.execute("PRAGMA table_info(git_sync_state)").fetchall()}
         if "branch" not in sync_cols:
             conn.execute("ALTER TABLE git_sync_state ADD COLUMN branch TEXT")
+    if version < 5:
+        # v5: per-project programming languages (JSON array)
+        proj_cols = {r["name"] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
+        if "languages" not in proj_cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN languages TEXT NOT NULL DEFAULT '[]'")
     # no commit here: init_db wraps _migrate in a single transaction
 
 

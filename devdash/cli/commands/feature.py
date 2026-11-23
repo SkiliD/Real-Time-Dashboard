@@ -1,9 +1,4 @@
-"""`devdash feature ...` commands.
-
-ABSOLUTE RULE: a feature is 'done' ONLY by an explicit human action here
-(`feature done <nom>` = manual validation, or `feature approve <nom>` for an
-AI proposal). The system never marks a feature done by itself.
-"""
+"""devdash feature ..."""
 
 from __future__ import annotations
 

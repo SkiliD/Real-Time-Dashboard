@@ -1,4 +1,4 @@
-"""`devdash demo ...` commands: seed demo data to explore the tool."""
+# devdash demo -- seed fake data to poke around
 
 from __future__ import annotations
 

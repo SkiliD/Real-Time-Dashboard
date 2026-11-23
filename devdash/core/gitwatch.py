@@ -1,10 +1,6 @@
-"""Read-only Git integration (core).
+"""parse the git log read-only, link commits to tasks
 
-DevDash NEVER writes to the user's repository: only read-only git commands
-(`rev-parse`, `log`) are run via subprocess. Commits are cached in the local
-SQLite DB (git_commits) and linked to tasks/features by parsing the commit
-subject with configurable regexes (config.commit_patterns, default:
-"#42" -> task 42, "task-42: ..." -> task 42, "feat(name): ..." -> feature).
+Small on purpose -- it has to stay fast.
 """
 
 from __future__ import annotations
@@ -116,15 +112,6 @@ def ensure_gitignore(repo_path: str | Path, home: Path | None = None) -> dict:
     return {"updated": True, "path": str(gi), "lines": len(block)}
 
 
-def head_hash(repo_path) -> str | None:
-    """Current HEAD commit hash, or None if unavailable. Used by the watcher to
-    skip the (expensive) full `git log` when nothing changed."""
-    try:
-        return _git(repo_path, "rev-parse", "HEAD").strip() or None
-    except GitError:
-        return None
-
-
 # --- links (project <-> local repo) ----------------------------------------
 
 def link(conn: sqlite3.Connection, project_id: int, repo_path: str) -> str:
@@ -203,8 +190,14 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
     p = Path(repo_path).expanduser().resolve()
     if not p.exists():
         raise GitError(f"path does not exist: {p}")
-    _git(p, "rev-parse", "--git-dir")  # raises GitError if not a repo
-    branch = _git(p, "rev-parse", "--abbrev-ref", "HEAD").strip() or "HEAD"
+    # one subprocess answers everything: repo validity, HEAD hash and branch
+    # (in %D, "HEAD -> main" means we are on main; plain "HEAD" = detached)
+    out = _git(p, "show", "-s", "--format=%H%x1f%D", "HEAD").strip()
+    head, _, refs = out.partition("\x1f")
+    head = head.strip()
+    branch = "HEAD"
+    if "HEAD -> " in refs:
+        branch = refs.split("HEAD -> ", 1)[1].split(",", 1)[0].strip() or "HEAD"
 
     # cheap check: if HEAD did not move AND the branch is unchanged since the
     # last sync, skip the full `git log` (a branch switch with the same HEAD
@@ -212,7 +205,6 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
     state = conn.execute(
         "SELECT last_seen_hash, branch FROM git_sync_state WHERE repo_path = ?", (str(p),)
     ).fetchone()
-    head = head_hash(p)
     if (state and head and state["last_seen_hash"] == head
             and (state["branch"] or branch) == branch):
         cached = conn.execute(
@@ -258,7 +250,7 @@ def sync_repo(conn: sqlite3.Connection, repo_path: str, patterns: list[str]) -> 
         "last_sync_at = excluded.last_sync_at, last_seen_hash = excluded.last_seen_hash, "
         "branch = excluded.branch",
         # store the FULL HEAD hash (not the short one) so the next sync's
-        # `head_hash() == last_seen_hash` cheap-skip actually triggers
+        # "HEAD unchanged" cheap-skip actually triggers
         (str(p), now_iso(), head, branch),
     )
     # one transaction for all inserts + all events (instead of 2 fsyncs per commit)

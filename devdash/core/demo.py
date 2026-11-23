@@ -1,10 +1,4 @@
-"""Demo data seeding: `devdash demo seed`.
-
-Fills a fresh install with plausible sample data (2 projects, tasks, a feature,
-sessions and devlog entries spread over the last week) so the CLI and GUI can
-be explored without a real project. Demo rows are regular rows: wipe the data
-folder (~/.devdash) to start clean.
-"""
+# demo seed data
 
 from __future__ import annotations
 
@@ -68,7 +62,7 @@ def seed(conn: sqlite3.Connection) -> dict:
     p1 = projects.create(
         conn, "Aether Vale",
         description="Metroidvania 2D sous Unity. Boucle dash/attaque/esquive.",
-        engine="unity", color="#7c5cff", status="development",
+        engine="unity", color="#2563eb", status="development",
     )
     p2 = projects.create(
         conn, "Portfolio Web",

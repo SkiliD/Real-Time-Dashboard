@@ -1,8 +1,4 @@
-"""Compact project context builder for the AI (privacy/token hygiene).
-
-This is the ONLY function that prepares what is sent to the model: a compact
-summary of the active project — never a raw database dump.
-"""
+"""build the small context blob we send to the model"""
 
 from __future__ import annotations
 
@@ -21,8 +17,10 @@ def build_context(conn: sqlite3.Connection, project_id: int | None = None,
         return "Aucun projet actif."
     lines: list[str] = []
     prog = stats.project_progress(conn, active.id)
+    langs = ", ".join(active.languages) if active.languages else "non précisé"
     lines.append(
-        f"Projet actif: {active.name} (moteur/tech: {active.engine}, statut: {active.status}), "
+        f"Projet actif: {active.name} (moteur/tech: {active.engine}, langages: {langs}, "
+        f"statut: {active.status}), "
         f"progression estimée {prog['pct_weighted']}% ({prog['done']}/{prog['total']} tâches faites)"
     )
     open_tasks = tsk.list(conn, project_id=active.id, status=["todo", "in_progress"],

@@ -1,6 +1,5 @@
-"""`devdash status` — instant snapshot of the active project, with a live
---watch loop (rich screen refresh, or JSONL lines with --json --watch).
-"""
+# devdash status -- the one-glance snapshot
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 

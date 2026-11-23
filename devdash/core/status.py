@@ -1,6 +1,4 @@
-"""Instant snapshot of a project — the brain of `devdash status` (CLI) and of
-the GUI header. Pure read over the other core modules.
-"""
+"""project snapshot behind `devdash status` and the GUI header"""
 
 from __future__ import annotations
 

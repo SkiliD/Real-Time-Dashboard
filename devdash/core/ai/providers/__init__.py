@@ -1,1 +1,3 @@
-"""AI provider implementations (interchangeable via config.json)."""
+# provider registry
+# Read-only on purpose.
+

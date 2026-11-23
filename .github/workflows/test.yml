@@ -1,0 +1,29 @@
+# DevDash CI: prove the CLI + core + GUI server work on all three desktop OSes.
+# The native-window test needs a display, so it is skipped on headless CI by design
+# (the HTTP-level GUI tests still run everywhere).
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (test extra only; GUI native window needs system webkit on Linux)
+        run: python -m pip install -e ".[test]"
+      - name: Smoke — CLI help works
+        run: python -m devdash --help
+      - name: Test suite
+        run: python -m pytest -q

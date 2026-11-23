@@ -1,6 +1,3 @@
-"""Local AI provider via Ollama (http://localhost:11434) — fully private:
-nothing leaves the machine. Requires `ollama serve` and a pulled model."""
-
 from __future__ import annotations
 
 import json

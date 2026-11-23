@@ -1,9 +1,4 @@
-"""GUI settings tab for the AI: provider catalog, config read/save (the API key
-is write-only), connection dry-run, and HTTP end-to-end.
-
-Security invariants checked here: the API key never appears in any API
-response, in errors, or in the event bus — only an `api_key_set` boolean.
-"""
+"""tests -- ai config gui"""
 
 from __future__ import annotations
 

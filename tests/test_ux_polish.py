@@ -1,6 +1,3 @@
-"""UX-polish consistency checks: the new palette/shortcuts/toasts layer must stay
-wired to real DOM ids and real i18n keys (no node available here, so we check
-statically)."""
 import re
 from pathlib import Path
 

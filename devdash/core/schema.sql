@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS projects (
     description TEXT NOT NULL DEFAULT '',
     engine      TEXT NOT NULL DEFAULT 'other', -- unity|unreal|godot|web|other (free label)
     color       TEXT NOT NULL DEFAULT '#8a8f98', -- identity color (hex)
+    languages   TEXT NOT NULL DEFAULT '[]',    -- JSON array: programming languages used (csharp, gdscript, ...)
     status      TEXT NOT NULL DEFAULT 'idea',  -- idea|design|prototype|development|beta|done|paused
     archived    INTEGER NOT NULL DEFAULT 0,   -- soft hide, never hard delete
     created_at  TEXT NOT NULL,

@@ -1,7 +1,4 @@
-"""Self-update: `devdash update` / /api/update/* — git status, check (fetch+compare),
-ff-only pull, dirty-tree abort, dependency reinstall skip. Uses LOCAL git remotes
-(file paths), so no network is involved.
-"""
+"""tests -- updater"""
 
 from __future__ import annotations
 

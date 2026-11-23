@@ -1,10 +1,4 @@
-"""DevDash CLI entry point.
-
-Global option: --json (machine-readable output for every command).
-Commands are grouped in devdash/cli/commands/*.py; all business logic lives
-in devdash.core -- this layer only formats and forwards. User-facing text is
-translated via devdash.core.i18n.tr (language from config.json `lang`).
-"""
+# entry point, wires up all the sub-apps
 
 from __future__ import annotations
 

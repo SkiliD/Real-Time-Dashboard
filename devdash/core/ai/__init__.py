@@ -1,28 +1,6 @@
-"""Optional AI assistant layer.
+"""optional AI layer -- stays dark unless ai_enabled=true
 
-Fully optional: with `ai_enabled = false` (default) in config.json,
-`get_provider()` returns None and every AI feature cleanly reports disabled.
-
-Providers are interchangeable, chosen by `ai_provider` in config.json:
-
-  LOCAL (nothing leaves the machine — "cloud" flag stays false):
-    "ollama"   Ollama HTTP API (default http://localhost:11434, ai_base_url to override)
-    "local"    ANY local OpenAI-compatible server: LM Studio (:1234), llama.cpp
-               server (:8080), vLLM, text-generation-webui... default
-               http://localhost:1234/v1, override with ai_base_url. No API key.
-    "cli"      ANY local AI as a command line (ai_cli_command): prompt JSON on
-               stdin, answer on stdout. No shell involved (shlex.split only).
-    "mock"     deterministic, no network (tests/demos)
-
-  CLOUD (data leaves the machine — the GUI shows a warning banner):
-    "anthropic"  Claude / Anthropic (default https://api.anthropic.com) — needs ai_api_key
-    "mistral"  Mistral AI (default https://api.mistral.ai/v1) — needs ai_api_key
-    "openai"   OpenAI (default https://api.openai.com/v1)      — needs ai_api_key
-    "openai_compat"  any custom OpenAI-compatible cloud endpoint
-                     (set ai_base_url + ai_api_key)
-
-API keys live ONLY in ~/.devdash/config.json (chmod 600), never in the
-database, never hardcoded, never echoed in errors.
+Small on purpose -- it has to stay fast.
 """
 
 from __future__ import annotations

@@ -1,16 +1,13 @@
-"""Projects CRUD + the single "active project" pointer.
-
-Switching the active project only updates meta.active_project_id: NO data of
-any project is ever touched, so switching focus is instant and lossless.
-Projects can be soft-archived (archived=1, hidden from the default list) or
-hard-deleted via delete() — an explicit user action only (the GUI asks for
-confirmation); the schema's ON DELETE CASCADE removes all attached rows.
-"""
+# projects CRUD + the active-project pointer
+# Read-only on purpose.
 
 from __future__ import annotations
 
+import builtins
+import json
 import re
 import sqlite3
+import unicodedata
 
 from . import events
 from .models import Project, now_iso
@@ -21,7 +18,10 @@ SUGGESTED_ENGINES = ("unity", "unreal", "godot", "web", "other")
 
 
 def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    # fold accents (é -> e) so "Jeu Été" becomes "jeu-ete", not "jeu-t"
+    n = unicodedata.normalize("NFKD", name)
+    n = "".join(c for c in n if not unicodedata.combining(c))
+    slug = re.sub(r"[^a-z0-9]+", "-", n.lower()).strip("-")
     return slug or "project"
 
 
@@ -36,6 +36,9 @@ def _unique_slug(conn: sqlite3.Connection, base: str) -> str:
 
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+MAX_LANGUAGES = 12
+MAX_LANG_LEN = 24
+
 
 def _validate_color(color: str) -> str:
     """Colors end up in a CSS `style` attribute in the GUI: only allow #rrggbb,
@@ -45,6 +48,28 @@ def _validate_color(color: str) -> str:
     return color.lower()
 
 
+def _validate_languages(languages) -> list[str]:
+    """Normalize the per-project programming languages: free labels, lowercase,
+    deduplicated, bounded (they are displayed in the UI and sent in the AI context)."""
+    # NB: this module defines its own list() function, which shadows the builtin
+    if not isinstance(languages, (builtins.list, builtins.tuple)):
+        raise ValueError("languages must be a list of strings")
+    out: list[str] = []
+    for lang in languages:
+        if not isinstance(lang, str):
+            raise ValueError("languages must be a list of strings")
+        lang = lang.strip().lower().replace(" ", "-")
+        if not lang:
+            continue
+        if len(lang) > MAX_LANG_LEN:
+            raise ValueError(f"language name too long: {lang!r} (max {MAX_LANG_LEN} chars)")
+        if lang not in out:
+            out.append(lang)
+    if len(out) > MAX_LANGUAGES:
+        raise ValueError(f"too many languages (max {MAX_LANGUAGES})")
+    return out
+
+
 def create(
     conn: sqlite3.Connection,
     name: str,
@@ -52,6 +77,7 @@ def create(
     engine: str = "other",
     color: str = "#8a8f98",
     status: str = "idea",
+    languages: list[str] | None = None,
 ) -> Project:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("project name is required (non-empty)")
@@ -61,15 +87,17 @@ def create(
     if not isinstance(engine, str) or not engine.strip() or len(engine) > 40:
         raise ValueError("engine must be a non-empty string of at most 40 characters")
     color = _validate_color(color)
+    langs = _validate_languages(languages or [])
     now = now_iso()
     slug = _unique_slug(conn, _slugify(name))
     for _attempt in range(5):  # bounded retry on a slug race
         try:
             with conn:  # row + event in one transaction
                 cur = conn.execute(
-                    "INSERT INTO projects(slug, name, description, engine, color, status, "
-                    "archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
-                    (slug, name, description, engine.lower(), color, status, now, now),
+                    "INSERT INTO projects(slug, name, description, engine, color, languages, "
+                    "status, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    (slug, name, description, engine.lower(), color,
+                     json.dumps(langs), status, now, now),
                 )
                 project = get(conn, cur.lastrowid)
                 assert project is not None
@@ -142,6 +170,7 @@ def update(
     color: str | None = None,
     status: str | None = None,
     archived: bool | None = None,
+    languages: list[str] | None = None,
 ) -> Project:
     project = get(conn, ref)
     if project is None:
@@ -162,6 +191,8 @@ def update(
         ("color", color),
         ("status", status),
         ("archived", None if archived is None else int(archived)),
+        # None = "no change"; an explicit list (even empty) replaces the languages
+        ("languages", None if languages is None else json.dumps(_validate_languages(languages))),
     ):
         if value is not None:
             fields.append(f"{column} = ?")

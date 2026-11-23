@@ -1,4 +1,4 @@
-/* DevDash — dark, sober, data-dense. No gradient gimmicks (anti-slop). */
+/* DevDash — dark, sober, data-dense. Flat colors, no gimmicks. */
 :root {
   --bg: #0f1115;
   --panel: #161a22;
@@ -6,7 +6,9 @@
   --border: #262c38;
   --text: #e6e8ee;
   --text-dim: #9aa3b2;
-  --accent: #6a4fe6; /* was #7c5cff (4.35:1 on white < 4.5 WCAG AA) */
+  --accent: #2563eb;      /* professional blue: 5.1:1 with white text, 5.1:1 on white bg (WCAG AA) */
+  --accent-text: #60a5fa; /* lighter blue for small text ON the dark background (7.4:1) */
+  --proj: var(--accent);  /* themed by the ACTIVE project's color at runtime */
   --bg-glow: #131722; /* top vignette tint (see body background) */
   --green: #3fb27f;
   --red: #e5534b;
@@ -31,14 +33,14 @@ body {
   display: flex; flex-direction: column; padding: 14px 12px;
 }
 .brand { font-size: 18px; font-weight: 700; letter-spacing: .3px; margin-bottom: 14px; }
-.brand span { color: var(--accent); }
+.brand span { color: var(--accent-text); }
 .project-list { list-style: none; margin: 14px 0 0; padding: 0; overflow-y: auto; flex: 1; }
 .project-list li {
   padding: 8px 10px; border-radius: var(--radius); cursor: pointer;
   display: flex; align-items: center; gap: 8px; color: var(--text-dim);
 }
 .project-list li:hover { background: var(--panel-2); color: var(--text); }
-.project-list li.active { background: var(--panel-2); color: var(--text); font-weight: 600; }
+.project-list li.active { background: color-mix(in srgb, var(--proj) 16%, var(--panel-2)); color: var(--text); font-weight: 600; }
 .project-list .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .project-list .meta { font-size: 11px; margin-left: auto; opacity: .7; }
 .sidebar-footer { color: var(--text-dim); font-size: 11px; padding-top: 8px; border-top: 1px solid var(--border); }
@@ -47,7 +49,7 @@ body {
 /* main */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #project-header {
-  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  padding: 14px 20px; border-bottom: 2px solid var(--proj); /* themed by the active project */
   display: flex; align-items: baseline; gap: 12px;
 }
 #project-header .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
@@ -159,9 +161,9 @@ body {
   padding: 8px 14px; cursor: pointer; font-size: 13px; font-family: var(--font);
   transition: color .15s ease-out;
 }
-.tab::after { /* animated underline on the active tab */
+.tab::after { /* animated underline on the active tab, themed by the active project */
   content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
-  background: var(--accent); border-radius: 2px;
+  background: var(--proj); border-radius: 2px;
   transform: scaleX(0); transform-origin: left; transition: transform .2s ease-out;
 }
 .tab:hover { color: var(--text); }
@@ -327,7 +329,7 @@ body {
 
 /* feature detail (linked tasks) */
 .feat-name { cursor: pointer; }
-.feat-name:hover { color: var(--accent); }
+.feat-name:hover { color: var(--accent-text); }
 .feat-detail { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
 .feat-task { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
 
@@ -394,7 +396,7 @@ kbd {
   border: 1px dashed var(--border); border-radius: var(--radius);
 }
 h1.clickable { cursor: pointer; }
-h1.clickable:hover { color: var(--accent); }
+h1.clickable:hover { color: var(--accent-text); }
 #session-eta { margin-left: 4px; }
 #task-modal-title .mini-btn { margin-left: 6px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -520,7 +522,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 
 /* sidebar: the active project gets a real state marker */
 .project-list li { transition: background-color .15s ease-out, color .15s ease-out; }
-.project-list li.active { box-shadow: inset 2px 0 0 var(--accent); }
+.project-list li.active { box-shadow: inset 2px 0 0 var(--proj); }
 
 /* brand mark */
 .brand { display: flex; align-items: center; gap: 8px; }
@@ -554,13 +556,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 :root[data-theme="light"] {
   color-scheme: light; /* native scrollbars/spinners/selects render light too */
   --bg: #f4f5fa;
-  --bg-glow: #e7e3fa;
+  --bg-glow: #dbe7fd; /* light blue tint */
   --panel: #ffffff;
   --panel-2: #eceef5;
   --border: #d7dbe7;
   --text: #1d2330;
   --text-dim: #5b6474;
-  /* accent #6a4fe6 keeps >= 4.5:1 contrast on white (WCAG AA) */
+  /* blue accent on white: #2563eb = 5.1:1, text tint #1d4ed8 = 6.7:1 (WCAG AA) */
+  --accent-text: #1d4ed8;
 }
 /* hardcoded dark surfaces get light variants */
 :root[data-theme="light"] .tag { background: #e2e5ee; }
@@ -627,3 +630,23 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 /* tags tint on hover */
 .tag { transition: background-color .12s ease-out, color .12s ease-out; }
 .tag:hover { color: var(--text); }
+
+/* ---------- project theming: active project color + engine/lang badges ---------- */
+.dot.eng { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; flex-shrink: 0; }
+.lang-badge {
+  display: inline-block; padding: 0 6px; margin-left: 4px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  font-size: 11px; color: var(--text-dim); font-family: var(--mono);
+}
+
+/* ---------- finishing touches: header progress bar, copyable commit hash ---------- */
+#project-header { position: relative; }
+#header-progress {
+  position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; pointer-events: none;
+}
+#header-progress-bar {
+  height: 100%; width: 0; background: var(--proj);
+  transition: width 0.4s ease-out;
+}
+.commit-hash { cursor: copy; }
+.commit-hash:hover { color: var(--accent-text); text-decoration: underline; }

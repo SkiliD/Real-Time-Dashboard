@@ -1,8 +1,4 @@
-"""Productivity statistics (core). Used by `devdash status` and the GUI charts.
-
-Timestamps are stored in UTC; day buckets ("today", streaks, per-day charts)
-are computed in the machine's LOCAL timezone via models helpers.
-"""
+# numbers for the charts: per-day time, streaks, tags
 
 from __future__ import annotations
 

@@ -1,6 +1,4 @@
-"""Git integration tests: real temporary git repo, read-only sync,
-commit parsing (#id / feat(name)), task links, status, events, idempotence.
-"""
+# tests -- gitwatch
 
 from __future__ import annotations
 

@@ -1,19 +1,5 @@
-"""Self-update helpers — update DevDash easily after a `git pull` (or another
-install mode).
-
-Install modes detected:
-  - "git"  : the devdash package lives inside a git checkout (pip install -e .)
-             -> update = `git pull --ff-only` + `pip install -e .` to refresh deps
-  - "exe"  : PyInstaller standalone binary (sys.frozen)
-             -> update = rebuild (scripts/build_exe.py) or replace the binary
-  - "pip"  : installed from a package (pip / pipx), source repo unknown
-             -> update = `pip install --upgrade devdash` / `pipx upgrade devdash`
-
-Safety: pull is ALWAYS --ff-only, never force; a dirty working tree aborts the
-update (the user commits themselves). Network happens ONLY on explicit user
-actions: `git fetch` in check_for_updates(), `git pull` in update(). git_status()
-is always offline.
-"""
+# git pull --ff-only + reinstall, only when asked
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 
@@ -107,6 +93,7 @@ def check_for_updates(repo: Path | None = None, fetch: bool = True) -> dict:
     }
 
 
+# TODO: also rebuild the .exe automatically after an update? maybe later
 def update(repo: Path | None = None, reinstall: bool = True) -> dict:
     """Apply the update. Git mode: ff-only pull (aborted when the tree is dirty)
     + `pip install -e .` to refresh dependencies. Other modes: guidance only.

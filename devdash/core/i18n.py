@@ -1,16 +1,4 @@
-"""DevDash internationalisation (i18n): one catalog, two languages.
-
-The UI language is a single config option: `lang` in <DEVDASH_HOME>/config.json
-("fr" by default, "en" for English). It drives BOTH interfaces:
-
-- CLI: user-facing strings go through `tr("key", **kwargs)`.
-- GUI: the server exposes GET /api/i18n -> {"lang": ..., "messages": {...}}
-  and the frontend translates with T(key, vars).
-
-Code identifiers, CLI command names, stored values (statuses/priorities/...),
-config keys and JSON API keys always stay English lowercase -- only the
-human-facing text is translated.
-"""
+# FR/EN string catalogs -- a test keeps them in sync
 
 from __future__ import annotations
 
@@ -345,7 +333,7 @@ FR: dict[str, str] = {
     "gui.cmd.launch": "Lance la GUI DevDash : fenêtre native (PyWebView), ou --browser.",
     "opt.browser": "Ouvre la GUI dans le navigateur par défaut au lieu de la fenêtre native",
     "opt.port": "Port (défaut : depuis la config, 8765)",
-    "err.no_pywebview": "pywebview n'est pas installé : lancez `pip install -e \".[gui]\"`, ou utilisez `devdash gui --browser`",
+    "err.no_pywebview": "pywebview n'est pas installé : `pip install -e \".[gui]\"`, ou `devdash gui --browser`. Sur Linux, la fenêtre native a aussi besoin du paquet système WebKit2GTK (ex. Debian/Ubuntu : `sudo apt install python3-gi gir1.2-webkit2-4.1`) — sinon utilisez --browser.",
     # --- GUI: static labels (index.html via data-i18n) ---
     "gui.new_project": "+ Nouveau projet",
     "gui.local": "local · ",
@@ -630,6 +618,20 @@ FR: dict[str, str] = {
     "gui.task.verify": "Vérifier avec l’IA",
     "gui.task.verify_approve": "✔ Approuver et marquer terminée",
     "gui.set.flag.task_verdict": "Verdict sur les tâches",
+    # --- project languages + engine theming ---
+    "opt.langs": "Langages de programmation du projet (répétable, ex. -l csharp -l gdscript)",
+    "projects.show.langs": "langages : {langs}",
+    "gui.modal.langs": "Langages (séparés par des virgules)",
+    "gui.modal.langs_ph": "csharp, gdscript…",
+    # --- finishing touches ---
+    "gui.stats.png": "⬇ PNG",
+    "gui.stats.png_done": "✔ Graphiques exportés en PNG",
+    "gui.set.open_home": "Ouvrir le dossier de données",
+    "gui.toast.open_home": "✔ Dossier ouvert : {path}",
+    "gui.sess.done": "⏰ Session terminée ! Note de fin ?",
+    "gui.task.time": "⏱ {min} min sur {n} session(s)",
+    "gui.task.time_badge": "temps passé sur cette tâche",
+    "gui.copy_hash": "Cliquer pour copier le hash complet",
 }
 
 EN: dict[str, str] = {
@@ -943,7 +945,7 @@ EN: dict[str, str] = {
     "gui.cmd.launch": "Launch the DevDash GUI: native desktop window (PyWebView), or --browser.",
     "opt.browser": "Open the GUI in the default browser instead of the native desktop window",
     "opt.port": "Port (default: from config, 8765)",
-    "err.no_pywebview": "pywebview is not installed: run `pip install -e \".[gui]\"`, or use `devdash gui --browser`",
+    "err.no_pywebview": "pywebview is not installed: `pip install -e \".[gui]\"`, or `devdash gui --browser`. On Linux the native window also needs the system WebKit2GTK package (e.g. Debian/Ubuntu: `sudo apt install python3-gi gir1.2-webkit2-4.1`) — otherwise use --browser.",
     "gui.new_project": "+ New project",
     "gui.local": "local · ",
     "gui.no_task": "— No task —",
@@ -1226,6 +1228,20 @@ EN: dict[str, str] = {
     "gui.task.verify": "Check with AI",
     "gui.task.verify_approve": "✔ Approve and mark done",
     "gui.set.flag.task_verdict": "Task verdict",
+    # --- project languages + engine theming ---
+    "opt.langs": "Programming languages of the project (repeatable, e.g. -l csharp -l gdscript)",
+    "projects.show.langs": "languages: {langs}",
+    "gui.modal.langs": "Languages (comma-separated)",
+    "gui.modal.langs_ph": "csharp, gdscript…",
+    # --- finishing touches ---
+    "gui.stats.png": "⬇ PNG",
+    "gui.stats.png_done": "✔ Charts exported as PNG",
+    "gui.set.open_home": "Open the data folder",
+    "gui.toast.open_home": "✔ Folder opened: {path}",
+    "gui.sess.done": "⏰ Session over! Add an end note?",
+    "gui.task.time": "⏱ {min} min across {n} session(s)",
+    "gui.task.time_badge": "time logged on this task",
+    "gui.copy_hash": "Click to copy the full hash",
 }
 
 MESSAGES: dict[str, dict[str, str]] = {"fr": FR, "en": EN}

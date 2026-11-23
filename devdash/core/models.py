@@ -1,11 +1,8 @@
-"""Typed data models for the DevDash core (dataclasses + row mappers)."""
-
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-
 
 def now_iso() -> str:
     """Current UTC time as an ISO-8601 string (seconds precision)."""
@@ -66,11 +63,13 @@ class Project:
     archived: bool
     created_at: str
     updated_at: str
+    languages: list[str] = field(default_factory=list)  # JSON array in the row
 
     @classmethod
     def from_row(cls, row) -> "Project":
         d = dict(row)
         d["archived"] = bool(d["archived"])
+        d["languages"] = parse_tags(d.get("languages"))  # corrupt JSON -> []
         return cls(**d)
 
     def to_dict(self) -> dict:

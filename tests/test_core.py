@@ -1,10 +1,4 @@
-"""Core tests: schema, projects (multi-project + lossless active
-switch), tasks (filters, solo-focus start), events bus, config roundtrip.
-
-Run with: python -m pytest -q
-Each test gets an isolated DEVDASH_HOME (tmp_path) -- the real ~/.devdash is
-never touched.
-"""
+"""tests -- core"""
 
 from __future__ import annotations
 

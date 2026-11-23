@@ -1,10 +1,6 @@
-"""Security + AI-provider flexibility tests.
+"""tests -- security ai
 
-Security: no API key leakage (status/events/errors), Host+Origin enforcement
-on mutating routes, ReDoS cap on commit-message parsing, DB file perms,
-CSRF-relevant headers. AI: every provider family (ollama / local HTTP /
-cli subprocess / cloud presets / mock), loopback-aware cloud detection,
-and the local-only `ai context` preview.
+Small on purpose -- it has to stay fast.
 """
 
 from __future__ import annotations

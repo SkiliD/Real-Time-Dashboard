@@ -1,13 +1,9 @@
-"""Abstract AI provider interface. Implementations live in providers/."""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-
 class AIError(Exception):
     """Any provider/transport failure (network, auth, bad response...)."""
-
 
 class AIDisabledError(Exception):
     """Raised when an AI feature is used but AI is disabled or the

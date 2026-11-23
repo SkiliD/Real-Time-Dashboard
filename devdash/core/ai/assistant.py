@@ -1,11 +1,4 @@
-"""AI assistant business functions. Used by BOTH the CLI (`devdash ai
-...`) and the GUI (chat panel). SAFETY RULES:
-- read-only by default: `plan(apply=False)` only proposes, never writes;
-  `apply=True` (CLI --apply / GUI confirm button) is the explicit human consent;
-- `feature_verdict` NEVER marks a feature done — it only records a proposal
-  (features.propose) that a human must approve/reject.
-- context sent to the model is built by context.build_context (compact summary).
-"""
+# AI brains shared by CLI and GUI: context, ask, plan, verify
 
 from __future__ import annotations
 

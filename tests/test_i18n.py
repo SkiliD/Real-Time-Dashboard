@@ -1,4 +1,5 @@
-"""i18n tests: config `lang`, tr(), CLI output in fr/en, GUI /api/i18n."""
+# tests -- i18n
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 

@@ -1,9 +1,4 @@
-"""Deterministic mock provider — for tests and demos, no network.
-
-Set in config.json: ai_enabled=true, ai_provider="mock", ai_model="mock".
-Recognizes the assistant prompts: "subtasks" -> JSON plan, "verdict" -> JSON
-feature verdict, otherwise echoes a short text answer.
-"""
+"""fake provider for tests"""
 
 from __future__ import annotations
 

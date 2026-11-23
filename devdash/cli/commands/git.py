@@ -1,7 +1,3 @@
-"""`devdash git ...` commands. READ-ONLY: DevDash never writes to
-your repository; it only runs `git log` / `git rev-parse`.
-"""
-
 from __future__ import annotations
 
 import typer

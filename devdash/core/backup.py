@@ -1,12 +1,3 @@
-"""One-command backup of the whole DevDash home (db + config) as a timestamped zip.
-
-Used by the CLI (`devdash backup`) and the GUI (POST /api/backup).
-
-The DB snapshot uses SQLite's online backup API, so it is consistent even
-while the GUI is running. The zip contains devdash.db + config.json (the API
-keys stay inside the backup — it is a LOCAL file, treat it accordingly).
-"""
-
 from __future__ import annotations
 
 import sqlite3

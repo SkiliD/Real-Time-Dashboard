@@ -1,6 +1,4 @@
-"""GUI launcher: native desktop window (PyWebView) by default, or the default
-browser with --browser. Both modes run the same local HTTP server.
-"""
+"""pywebview window, falls back to --browser"""
 
 from __future__ import annotations
 

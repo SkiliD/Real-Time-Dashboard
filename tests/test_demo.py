@@ -1,5 +1,3 @@
-"""Demo seed tests: core seeding + `devdash demo seed` CLI."""
-
 from __future__ import annotations
 
 import json

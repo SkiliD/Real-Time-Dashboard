@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DevDash</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' rx='5' fill='%232563eb'/%3E%3Cpath d='M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
   <script>/* apply the saved theme before first paint (no flash of the wrong theme) */
     try { document.documentElement.dataset.theme = localStorage.getItem("devdash-theme") || "dark"; }
     catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
@@ -23,7 +24,7 @@
 
   <aside id="sidebar">
 
-    <div class="brand"><svg class="brand-mark" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#6a4fe6"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>Dev<span>Dash</span></div>
+    <div class="brand"><svg class="brand-mark" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#2563eb"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>Dev<span>Dash</span></div>
     <button id="btn-new-project" class="btn btn-primary btn-block" data-i18n="gui.new_project">+ Nouveau projet</button>
     <ul id="project-list" class="project-list"></ul>
     <div class="sidebar-footer"><span data-i18n="gui.local">local · </span><span id="conn-status">●</span></div>
@@ -35,6 +36,7 @@
 
       <div id="project-header-left"></div>
       <div class="spacer"></div>
+      <div id="header-progress" title="Progression du projet"><div id="header-progress-bar"></div></div>
       <div id="session-panel">
 
         <div id="session-timer" class="hidden">
@@ -264,6 +266,7 @@
         <div class="settings-actions">
           <button id="btn-backup" class="btn" data-i18n="gui.set.backup_btn">Sauvegarder maintenant (zip)</button>
           <button id="btn-export" class="btn" data-i18n="gui.set.export_btn">Exporter en JSON</button>
+          <button id="btn-open-home" class="btn" data-i18n="gui.set.open_home">Ouvrir le dossier de données</button>
           <button id="btn-demo" class="btn" data-i18n="gui.set.demo_btn">Charger les données de démo</button>
           <span id="backup-status" class="dim"></span>
         </div>
@@ -292,6 +295,8 @@
             <option value="month" data-i18n="gui.stats.group.month">Mois</option>
           </select>
         </label>
+        <span class="spacer"></span>
+        <button id="btn-stats-png" class="btn btn-sm" data-i18n="gui.stats.png">⬇ PNG</button>
       </div>
       <div id="stat-cards">
         <div class="stat-card"><div class="stat-value" id="stat-today">–</div><div class="stat-label" data-i18n="gui.stat.today">Aujourd’hui</div></div>
@@ -323,6 +328,7 @@
       </select>
     </label>
     <label><span data-i18n="gui.modal.color">Couleur</span> <input id="e-color" type="color"></label>
+    <label><span data-i18n="gui.modal.langs">Langages (séparés par des virgules)</span> <input id="e-langs" type="text" data-i18n-ph="gui.modal.langs_ph" placeholder="csharp, gdscript…"></label>
     <label><span data-i18n="gui.modal.status">Statut</span>
       <select id="e-status">
         <option value="idea" data-i18n="pstatus.idea">Idée</option><option value="design" data-i18n="pstatus.design">Conception</option>
@@ -373,6 +379,7 @@
     <label><span data-i18n="gui.est_title">Estimation (min)</span> <input id="t-est" type="number" min="0" step="5"></label>
     <label><span data-i18n="gui.task.parent">Tâche parente</span> <select id="t-parent"><option value="" data-i18n="gui.task.none">— aucune —</option></select></label>
     <label><span data-i18n="gui.task.feature">Feature liée</span> <select id="t-feature"><option value="" data-i18n="gui.task.none">— aucune —</option></select></label>
+    <div id="task-time" class="dim small"></div>
     <div id="task-verdict-box" class="hidden">
       <button id="btn-task-verify" class="btn btn-sm">🤖 <span data-i18n="gui.task.verify">Vérifier avec l’IA</span></button>
       <div id="task-verdict-result" class="dim small"></div>
@@ -403,7 +410,8 @@
         <option value="other" selected data-i18n="engine.other">Autre</option>
       </select>
     </label>
-    <label><span data-i18n="gui.modal.color">Couleur</span> <input id="f-color" type="color" value="#7c5cff"></label>
+    <label><span data-i18n="gui.modal.color">Couleur</span> <input id="f-color" type="color" value="#2563eb"></label>
+    <label><span data-i18n="gui.modal.langs">Langages (séparés par des virgules)</span> <input id="f-langs" type="text" data-i18n-ph="gui.modal.langs_ph" placeholder="csharp, gdscript…"></label>
     <label><span data-i18n="gui.modal.status">Statut</span>
       <select id="f-status">
         <option value="idea" selected data-i18n="pstatus.idea">Idée</option><option value="design" data-i18n="pstatus.design">Conception</option>
@@ -427,7 +435,7 @@
       <tr><td><kbd>n</kbd></td><td data-i18n="gui.help.k2"></td></tr>
       <tr><td><kbd>/</kbd></td><td data-i18n="gui.help.k3"></td></tr>
       <tr><td><kbd>s</kbd></td><td data-i18n="gui.help.k4"></td></tr>
-      <tr><td><kbd>1</kbd>–<kbd>7</kbd></td><td data-i18n="gui.help.k5"></td></tr>
+      <tr><td><kbd>1</kbd>–<kbd id="help-tabs-max">7</kbd></td><td data-i18n="gui.help.k5"></td></tr>
       <tr><td><kbd>r</kbd></td><td data-i18n="gui.help.k6"></td></tr>
       <tr><td><kbd>Échap</kbd></td><td data-i18n="gui.help.k7"></td></tr>
       <tr><td><kbd>?</kbd></td><td data-i18n="gui.help.k8"></td></tr>

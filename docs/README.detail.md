@@ -37,6 +37,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[gui,test]"
 ```
 
+Linux uniquement — la fenêtre native (PyWebView) a aussi besoin du paquet système WebKit2GTK :
+```bash
+# Debian/Ubuntu : sudo apt install python3-gi gir1.2-webkit2-4.1
+# Fedora :        sudo dnf install webkit2gtk4.1 python3-gobject
+# Arch :          sudo pacman -S webkit2gtk python-gobject
+```
+macOS ne demande rien de plus. Sans écran (headless) : `devdash gui --browser`.
+
 Variante sans venv (installation utilisateur) :
 
 ```bash
@@ -65,9 +73,15 @@ PyInstaller fabrique un binaire unique, double-cliquable :
 
 ```bash
 pip install -e ".[build]"            # ajoute pyinstaller
-py -3 scripts/build_exe.py           # -> dist/devdash.exe (Windows) / dist/devdash (macOS, Linux)
-py -3 scripts/build_exe.py --onedir  # build dossier (démarrage plus rapide, plus simple à whitelister côté antivirus)
+py -3 scripts/build_exe.py           # -> build dossier dist/devdash/devdash.exe (défaut, plus discret pour les antivirus)
+py -3 scripts/build_exe.py --onefile # build fichier unique dist/devdash.exe (plus pratique à partager)
 py -3 scripts/build_exe.py --no-gui  # exe CLI seul (plus petit, sans pywebview)
+py -3 scripts/build_exe.py --no-console  # exe fenêtrée (pas de console) pour un double-clic GUI
+# SmartScreen (exe non signé) : « Informations complémentaires > Exécuter quand même ».
+# Pour supprimer l'avertissement avec un certificat de confiance :
+#   .\scripts\sign_exe.ps1 -ExePath "dist\devdash\devdash.exe"
+# Le build embarque les métadonnées de version Windows (scripts/version_info.txt) et un
+# manifeste asInvoker/DPI (scripts/app.manifest) ; UPX est désactivé.
 ```
 
 - **Buildez sur l'OS cible** (un exe PyInstaller n'est pas cross-platform).
@@ -118,7 +132,8 @@ et un watcher Git scanne les dépôts liés toutes les `git_watch_interval_sec`
 Des endpoints en lecture seule exposent aussi la liste des tags (`GET /api/tags`),
 les dépôts Git liés (`GET /api/git/repos`) et les fichiers de `DEVDASH_HOME`
 (`GET /api/files` : sauvegardes/exports, jamais `config.json`), confinés au
-répertoire home local. `POST /api/fs/pick` ouvre le sélecteur de dossier natif
+répertoire home local. `POST /api/features/propose` (lecture seule aussi :
+propositions de l’IA en attente de validation humaine). `POST /api/fs/pick` ouvre le sélecteur de dossier natif
 de l'OS sur le bureau et renvoie le chemin choisi (ou `null` si annulé) — la
 GUI ne fait que pré-remplir le champ chemin ; connecter un dossier ou lier un
 dépôt reste une action explicite de l'utilisateur.
@@ -147,6 +162,8 @@ la commande) pour une sortie machine.
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | changement de statut |
 | `task edit <id>` | `devdash task edit 3 --priority critical --tag vfx` | édition |
 | `task delete <id>` | `devdash task delete 3 --yes` | suppression définitive (sous-tâches suivies) |
+
+Les projets ont aussi une **couleur** (qui thème l'interface quand le projet est actif) et des **langages** (`--lang csharp --lang gdscript`, modifiables dans la GUI) : `devdash projects create "Mon Jeu" --engine unity --lang csharp`.
 | `session start` | `devdash session start --task 3 --kind focus --pomodoro` | minuteur interactif ; `--background` pour rendre la main, `--pomodoro` = après le focus, propose de lancer la pause automatiquement |
 | `session stop` | `devdash session stop --note "fait: X, bloqué: Y"` | durée + note de fin |
 | `session now` / `session list` | `devdash session list --week` | session en cours / historique (`--today`, `--week`, `-t <id tâche>`) |
@@ -245,10 +262,11 @@ command = "devdash"
 args = ["mcp"]
 ```
 
-Outils exposés : `devdash_status`, `devdash_projects_list`, `devdash_tasks_list`,
-`devdash_task_add`, `devdash_task_set_status`, `devdash_session_start/stop`,
-`devdash_log_add/search`, `devdash_stats`, `devdash_git_status/log`,
-`devdash_features_list`, `devdash_ai_ask` (si l’IA est activée).
+Outils exposés (16) : `devdash_status`, `devdash_projects_list`, `devdash_tasks_list`,
+`devdash_task_add`, `devdash_task_set_status`, `devdash_task_verify`,
+`devdash_session_start/stop`, `devdash_log_add/search`, `devdash_stats`,
+`devdash_git_status/log`, `devdash_features_list`, `devdash_ai_ask`,
+`devdash_ai_suggest` (si l’IA est activée).
 Règle identique à partout : **aucune action destructive**, git en lecture seule,
 et une feature n’est **jamais** marquée terminée par l’agent.
 

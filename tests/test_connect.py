@@ -1,6 +1,4 @@
-"""Connect DevDash to an EXISTING project folder: engine auto-detection, git root
-discovery (walk up), `projects connect` (CLI), /api/detect + /api/projects/connect.
-"""
+# tests -- connect
 
 from __future__ import annotations
 

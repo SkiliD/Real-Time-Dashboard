@@ -1,10 +1,3 @@
-"""Local HTTP server for the DevDash GUI (stdlib only).
-
-Serves the static frontend (/) and a small JSON API (/api/*) backed by
-gui.api.Api. The same server is embedded in the native desktop window
-(PyWebView) or used standalone with `devdash gui --browser`.
-"""
-
 from __future__ import annotations
 
 import json
@@ -35,6 +28,7 @@ GET_ROUTES = {
     "/api/events": lambda api, q: api.events_since(q.get("since", "0")),
     "/api/session/current": lambda api, q: api.session_current(),
     "/api/sessions": lambda api, q: api.sessions_list(q),
+    "/api/sessions/minutes": lambda api, q: api.sessions_minutes(q),
     "/api/logs": lambda api, q: api.logs_list(q),
     "/api/git/status": lambda api, q: api.git_status(q),
     "/api/git/commits": lambda api, q: api.git_commits(q),
@@ -61,6 +55,7 @@ POST_ROUTES = {
     "/api/tasks/status": lambda api, body: api.tasks_set_status(body),
     "/api/tasks/update": lambda api, body: api.tasks_update(body),
     "/api/tasks/delete": lambda api, body: api.tasks_delete(body),
+    "/api/open-home": lambda api, body: api.open_home(body),
     "/api/session/start": lambda api, body: api.session_start(body),
     "/api/session/stop": lambda api, body: api.session_stop(body),
     "/api/logs/add": lambda api, body: api.logs_add(body),

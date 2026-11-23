@@ -1,6 +1,5 @@
-"""Stats filters: group by day/week/month, period length, project scope
-(active / one / all), per-project breakdown. Core + API + HTTP.
-"""
+# tests -- stats filters
+# Read-only on purpose.
 
 from __future__ import annotations
 

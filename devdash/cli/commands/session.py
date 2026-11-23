@@ -1,9 +1,4 @@
-"""`devdash session ...` commands: work sessions + Pomodoro timer.
-
-- `session start` creates the session AND runs an interactive live timer
-  (Ctrl+C to stop, then a note is prompted). Use --background for scripts.
-- `session stop --note "..."` stops the running session.
-"""
+"""devdash session ... -- work timers, pomodoro-ish"""
 
 from __future__ import annotations
 

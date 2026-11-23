@@ -1,9 +1,5 @@
-"""`devdash ai ...` commands — OPTIONAL AI assistant.
-
-Without AI configured (ai_enabled=false in ~/.devdash/config.json), these
-commands fail cleanly with a clear message and the rest of DevDash is fully
-functional. No AI action ever writes without explicit consent (--apply).
-"""
+# devdash ai ... -- optional, off by default
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 

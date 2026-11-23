@@ -1,4 +1,7 @@
-"""`devdash log ...` commands: the devlog (dated, searchable journal)."""
+"""devdash log ... -- the devlog
+
+If it breaks, the tests will say so.
+"""
 
 from __future__ import annotations
 

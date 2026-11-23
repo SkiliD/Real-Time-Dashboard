@@ -1,6 +1,6 @@
-"""`devdash git ignore` / POST /api/git/ignore — the marker-delimited DevDash
-block in the USER's repo .gitignore: idempotent, preserves existing content,
-adds the config.json line when DEVDASH_HOME lives inside the repo.
+"""tests -- gitignore
+
+If it breaks, the tests will say so.
 """
 
 from __future__ import annotations

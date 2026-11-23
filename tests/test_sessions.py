@@ -1,6 +1,4 @@
-"""Core session tests: start/stop, auto-stop, current, history,
-durations, events, planned_min migration.
-"""
+# tests -- sessions
 
 from __future__ import annotations
 

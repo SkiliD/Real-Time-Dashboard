@@ -100,9 +100,10 @@ async function realLoadAll() {
     ? [loadAiConfig(), loadSettings(), loadUpdateStatus()]
     : [];
   await Promise.all([
-    loadTasks(), loadTags(), loadSession(), loadSessions(), loadLogs(), loadGit(),
+    loadTasks(), loadTags(), loadSessions(), loadTaskMinutes(), loadLogs(), loadGit(),
     loadFeatures(), loadAiStatus(), loadStats(), ...settingsLoads,
-    api.get("/api/status").then((s) => { state.status = s; }),
+    // /api/status also carries the running session: no need for a second call
+    api.get("/api/status").then((s) => { state.status = s; state.session = s.session || null; }),
   ]);
   render();
 }
@@ -116,20 +117,23 @@ async function loadTasks() {
 }
 
 async function loadTags() {
-  // unfiltered list: the filter select must keep showing every tag even while
-  // one is selected (otherwise you can never switch to another tag directly)
-  const q = new URLSearchParams();
-  if (state.statsFilters.project) q.set("project", state.statsFilters.project);
-  state.allTags = (await api.get("/api/tags?" + q.toString())).tags;
-}
-
-async function loadSession() {
-  const s = await api.get("/api/session/current");
-  state.session = s.running ? s.session : null;
+  // unfiltered list of the ACTIVE project: the filter select must keep showing
+  // every tag even while one is selected (otherwise you can never switch directly)
+  state.allTags = (await api.get("/api/tags")).tags;
 }
 
 async function loadSessions() {
   state.recentSessions = (await api.get("/api/sessions?limit=8")).sessions;
+}
+
+// per-task total minutes for the card badges: one aggregated query instead of
+// shipping hundreds of session rows on every poll
+async function loadTaskMinutes() {
+  try {
+    state.timeByTask = (await api.get("/api/sessions/minutes")).minutes;
+  } catch {
+    state.timeByTask = {};
+  }
 }
 
 async function loadLogs() {
@@ -170,8 +174,8 @@ async function loadStats() {
     renderStatsFilters();
   } catch (e) {
     state.stats = null;
-    // silent empty tab is confusing: say it (only when the user is looking at it)
-    if (state.tab === "stats") showError(e.message);
+    // an empty stats tab with no explanation is confusing: always toast the error
+    showError(e.message);
   }
 }
 
@@ -241,7 +245,7 @@ function fillAiForm() {
   $("#cfg-api-key").value = ""; // write-only: a stored key is never sent back to the client
   $("#cfg-api-key-set").classList.toggle("hidden", !cfg.api_key_set);
   $("#cfg-cli").value = cfg.ai_cli_command || "";
-  $("#cfg-context-max").value = cfg.ai_context_max_chars || 6000;
+  $("#cfg-context-max").value = cfg.ai_context_max_chars || DEFAULT_AI_CONTEXT_MAX;
   const fl = cfg.ai_feature_flags || {};
   $("#flag-chat").checked = !!fl.chat;
   $("#flag-summarize").checked = !!fl.summarize;
@@ -423,7 +427,7 @@ async function runUpdate() {
     btn.dataset.armed = "1";
     btn.textContent = T("gui.upd.confirm");
     st.textContent = "";
-    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.upd.update"); }, 6000);
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.upd.update"); }, ARM_LONG_MS);
     return;
   }
   btn.dataset.armed = "";
@@ -449,7 +453,7 @@ async function doDemoSeed() {
   if (btn.dataset.armed !== "1") {
     btn.dataset.armed = "1";
     btn.textContent = T("gui.set.demo_confirm");
-    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.set.demo_btn"); }, 5000);
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.set.demo_btn"); }, ARM_MS);
     return;
   }
   btn.dataset.armed = "";
@@ -492,7 +496,7 @@ function render() {
   renderPanel("kanban", [state.tasks, state.features], renderKanban);
   renderPanel("tagfilter", [state.allTags, state.filterTag], renderTagFilter);
   renderPanel("session", [state.session, state.tasks], renderSessionPanel);
-  renderPanel("sessions", state.sessions, renderSessions);
+  renderPanel("sessions", state.recentSessions, renderSessions);
   renderPanel("logs", [state.logs, state.logQuery], renderLogs);
   renderPanel("git", [state.gitStatus, state.gitCommits, state.gitUnparsed, state.gitTaskFilter], renderGit);
   renderPanel("features", state.features, renderFeatures);
@@ -508,18 +512,36 @@ function cssColor(c) {
   return /^#[0-9a-fA-F]{6}$/.test(c || "") ? c : "#8a8f98";
 }
 
+// per-engine accent colors, shown as a small dot next to the engine label
+const ENGINE_COLORS = { unity: "#38bdf8", unreal: "#e8e8ec", godot: "#7aa2f7", web: "#a3e635", other: "#9aa3b2" };
+function engineColor(e) { return ENGINE_COLORS[e] || ENGINE_COLORS.other; }
+
+// comma-separated input -> normalized language list (same rules as the core)
+function parseLangs(raw) {
+  return String(raw || "").split(",").map((s) => s.trim().toLowerCase().replace(/\s+/g, "-"))
+    .filter(Boolean).slice(0, 12);
+}
+
+// the ACTIVE project's color themes the chrome (header line, active tab, selection)
+function applyProjectTheme(p) {
+  if (p) document.documentElement.style.setProperty("--proj", cssColor(p.color));
+  else document.documentElement.style.removeProperty("--proj");
+}
+
 function renderProjects() {
   const ul = $("#project-list");
   ul.innerHTML = "";
+  applyProjectTheme(state.projects.find((x) => x.slug === state.active));
   for (const p of state.projects.filter((x) => !x.archived)) {  // archived hidden from the sidebar
     const li = document.createElement("li");
     if (p.slug === state.active) li.classList.add("active");
     li.innerHTML =
       `<span class="dot" style="background:${cssColor(p.color)}"></span>` +
       `<span>${escapeHtml(p.name)}</span>` +
-      `<span class="meta">${T("engine." + p.engine)}</span>` +
+      `<span class="meta"><span class="dot eng" style="background:${engineColor(p.engine)}"></span>${T("engine." + p.engine)}</span>` +
       `<button class="proj-edit" title="${T("gui.proj.edit_tt")}">✎</button>`;
-    li.title = p.slug + " — " + T("pstatus." + p.status);
+    li.title = p.slug + " — " + T("pstatus." + p.status) +
+      (p.languages && p.languages.length ? " — " + p.languages.join(", ") : "");
     li.onclick = () => runAction(async () => {
       await api.post("/api/projects/set-active", { ref: p.slug });
       notify(T("gui.toast.project_active", { name: p.name }));
@@ -546,12 +568,19 @@ function renderHeader() {
   const prog = st.progress ? ` · ${st.progress.pct_weighted}%` : "";
   const today = st.today_minutes != null ? ` · ⏱ ${Math.round(st.today_minutes)} ${T("gui.chart.minutes").toLowerCase().slice(0, 3)}.` : "";
   const streak = st.streak_days != null ? ` · 🔥 ${st.streak_days} ${T("gui.day_unit")}` : "";
+  const langs = (p.languages || []).map((l) => `<span class="lang-badge">${escapeHtml(l)}</span>`).join("");
   h.innerHTML =
     `<span class="dot" style="background:${cssColor(p.color)}"></span>` +
     `<h1 id="header-proj" class="clickable" title="${T("gui.proj.edit_tt")}">${escapeHtml(p.name)}</h1>` +
-    `<span class="sub">${T("gui.header.sub", { engine: T("engine." + p.engine), status: T("pstatus." + p.status), open })}${prog}${today}${streak}</span>`;
+    `<span class="sub"><span class="dot eng" style="background:${engineColor(p.engine)}"></span>` +
+    `${T("gui.header.sub", { engine: T("engine." + p.engine), status: T("pstatus." + p.status), open })}${prog}${today}${streak}${langs}</span>`;
   const hp = $("#header-proj");
   if (hp) hp.onclick = () => openEditModal(p); // click the project name in the header to edit it
+  // header progress bar (themed by the project color) + dynamic tab title
+  const pct = st.progress ? st.progress.pct_weighted : 0;
+  $("#header-progress-bar").style.width = pct + "%";
+  $("#header-progress").title = Math.round(pct) + "% — " + p.name;
+  if (!state.session) document.title = p.name + " · DevDash";
   const sel = $("#session-task");
   const inProgress = state.tasks.filter((t) => t.status === "in_progress");
   const current = sel.value;
@@ -561,6 +590,8 @@ function renderHeader() {
 }
 
 function renderKanban() {
+  // total minutes per task, for the card time badge (filled by loadTaskMinutes)
+  const timeByTask = state.timeByTask || {};
   const statuses = ["todo", "in_progress", "done", "cancelled"]; // cancelled get their own column (reopenable)
   for (const status of statuses) {
     const col = $("#col-" + status);
@@ -594,6 +625,8 @@ function taskCard(t) {
   });
   const tags = t.tags.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("");
   const est = t.estimate_min ? `<span class="est">${T("gui.est", { n: t.estimate_min })}</span>` : "";
+  const mins = Math.round((state.timeByTask || {})[t.id] || 0);
+  const timeBadge = mins > 0 ? `<span class="est" title="${T("gui.task.time_badge")}">⏱ ${mins}m</span>` : "";
   const subs = state.tasks.filter((x) => x.parent_id === t.id);
   const subsDone = subs.filter((x) => x.status === "done").length;
   const subBadge = subs.length
@@ -611,7 +644,7 @@ function taskCard(t) {
   if (t.status !== "cancelled" && t.status !== "done") actions.push(`<button class="btn btn-sm" data-act="cancelled">${T("gui.task.cancel")}</button>`);
   card.innerHTML =
     `<div class="title">#${t.id} ${escapeHtml(t.title)}</div>` +
-    `<div class="row"><span class="prio prio-${t.priority}">${T("prio." + t.priority)}</span>${tags}${est}${subBadge}${parentRef}${feat}</div>` +
+    `<div class="row"><span class="prio prio-${t.priority}">${T("prio." + t.priority)}</span>${tags}${est}${timeBadge}${subBadge}${parentRef}${feat}</div>` +
     `<div class="actions">${actions.join("")}</div>`;
   card.querySelectorAll("button[data-act]").forEach((b) => {
     b.onclick = (e) => { e.stopPropagation(); runAction(async () => {
@@ -717,6 +750,13 @@ function openTaskModal(t) {
   state.taskVerdict = null;
   $("#modal-task").classList.remove("hidden");
   $("#t-title").focus();
+  // total time logged on this task (sessions with task_id = this task)
+  runAction(async () => {
+    const r = await api.get("/api/sessions?task=" + t.id + "&limit=1000");
+    const rows = r.sessions || [];
+    const mins = Math.round(rows.reduce((a, s) => a + (s.duration_min || 0), 0));
+    $("#task-time").textContent = rows.length ? T("gui.task.time", { min: mins, n: rows.length }) : "";
+  });
 }
 function closeTaskModal() { $("#modal-task").classList.add("hidden"); state.editingTaskId = null; restoreFocus(); }
 
@@ -774,7 +814,19 @@ function renderSessionPanel() {
 function tickClock() {
   if (!state.session) return;
   const started = new Date(state.session.started_at).getTime();
-  $("#session-clock").textContent = fmtHms((Date.now() - started) / 1000);
+  const txt = fmtHms((Date.now() - started) / 1000);
+  $("#session-clock").textContent = txt;
+  document.title = "⏱ " + txt + " · DevDash"; // live timer in the tab/window title
+  // planned end reached -> toast + desktop notification, once per session
+  if (state.session.planned_min) {
+    const end = started + state.session.planned_min * 60000;
+    if (Date.now() >= end && state.sessionNotifyId !== state.session.id) {
+      state.sessionNotifyId = state.session.id;
+      notify(T("gui.sess.done"));
+      if (window.Notification && Notification.permission === "granted")
+        new Notification("DevDash", { body: T("gui.sess.done") });
+    }
+  }
 }
 
 function renderSessions() {
@@ -839,7 +891,7 @@ function renderLogs() {
         delBtn.dataset.armed = "1";
         delBtn.textContent = "⚠";
         delBtn.title = T("gui.log.del_confirm");
-        setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = "🗑"; }, 5000);
+        setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = "🗑"; }, ARM_MS);
       }
     };
     ul.appendChild(li);
@@ -889,12 +941,21 @@ function renderGit() {
         ? `<span class="tag">feat:${escapeHtml(c.parsed_feature)}</span>`
         : `<span class="tag dim">${T("gui.git.unrecognized")}</span>`;
     li.innerHTML =
-      `<span class="mono">${escapeHtml(c.short)}</span> ` +
+      `<span class="mono commit-hash" data-hash="${escapeHtml(c.hash)}" title="${T("gui.copy_hash")}">${escapeHtml(c.short)}</span> ` +
       `<span class="dim">${timeAgo(c.committed_at)}</span> ` +
       `<span class="dim">${escapeHtml(c.author)}</span> — ${escapeHtml(c.message)} ${link}`;
     ul.appendChild(li);
   }
   if (!ul.children.length) ul.innerHTML = `<li class="dim">${T("gui.git.empty")}</li>`;
+  // click a short hash to copy the full one
+  ul.querySelectorAll(".commit-hash").forEach((el) => {
+    el.onclick = () => {
+      const h = el.dataset.hash || "";
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(h).then(() => notify(T("gui.copied")), () => notify(T("gui.copied")));
+      else notify(T("gui.copied"));
+    };
+  });
 }
 
 async function gitLink() {
@@ -1016,7 +1077,7 @@ async function renderFeatures() {
       } else {
         delBtn.dataset.armed = "1";
         delBtn.textContent = "?";
-        setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = "🗑"; }, 5000);
+        setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = "🗑"; }, ARM_MS);
       }
     };
     ul.appendChild(li);
@@ -1099,7 +1160,7 @@ $("#btn-feat-delete").onclick = () => {
     btn.dataset.armed = "1";
     btn.textContent = T("gui.feat.delete_confirm");
     btn.classList.add("btn-danger-armed");
-    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.edit.delete"); btn.classList.remove("btn-danger-armed"); }, 6000);
+    setTimeout(() => { btn.dataset.armed = ""; btn.textContent = T("gui.edit.delete"); btn.classList.remove("btn-danger-armed"); }, ARM_LONG_MS);
     return;
   }
   runAction(async () => {
@@ -1113,7 +1174,7 @@ $("#btn-feat-delete").onclick = () => {
 /* ---------- stats & charts ---------- */
 
 const charts = {};
-const CHART_COLORS = ["#7c5cff", "#3fb27f", "#d9a13b", "#e5534b", "#38bdf8", "#f472b6", "#a3e635", "#fb923c"];
+const CHART_COLORS = ["#2563eb", "#3fb27f", "#d9a13b", "#e5534b", "#38bdf8", "#f472b6", "#a3e635", "#fb923c"];
 
 function chartDefaults() {
   if (window.Chart) {
@@ -1173,7 +1234,7 @@ function renderStats() {
   $("#chart-done-title").textContent = T("gui.chart.done_title", { group: groupLabel, n: days });
   $("#chart-projects-title").textContent = T("gui.chart.by_project", { n: days });
   makeBar("chart-time", s.time_by_day.map((d) => lbl(d.date)),
-          s.time_by_day.map((d) => d.minutes), T("gui.chart.minutes"), "#7c5cff");
+          s.time_by_day.map((d) => d.minutes), T("gui.chart.minutes"), "#2563eb");
   makeBar("chart-done", s.tasks_done_by_day.map((d) => lbl(d.date)),
           s.tasks_done_by_day.map((d) => d.count), T("gui.chart.tasks"), "#3fb27f");
   makeDoughnut("chart-tags", s.by_tag.map((t) => t.tag), s.by_tag.map((t) => t.tasks));
@@ -1214,7 +1275,7 @@ setInterval(() => {
 function chatEmptyState() {
   const wrap = document.createElement("div");
   wrap.className = "chat-empty";
-  wrap.innerHTML = '<svg class="brand-mark chat-empty-mark" width="34" height="34" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#6a4fe6"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>'; // static markup only
+  wrap.innerHTML = '<svg class="brand-mark chat-empty-mark" width="34" height="34" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#2563eb"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>'; // static markup only
   const p = document.createElement("p");
   p.className = "dim";
   p.textContent = T("gui.chat.welcome");
@@ -1231,7 +1292,7 @@ function chatEmptyState() {
   };
   chip(T("gui.chat.suggest_status"), () => { $("#chat-input").value = T("gui.chat.suggest_status"); chatSend(); });
   chip(T("gui.chat.week_user"), chatWeek);
-  chip(T("gui.chat.suggest_plan"), () => { $("#plan-input").focus(); });
+  chip(T("gui.chat.suggest_plan"), () => { switchTab("ai"); $("#plan-input").focus(); });
   wrap.appendChild(row);
   return wrap;
 }
@@ -1440,7 +1501,7 @@ function showError(msg) {
   t.classList.remove("hidden");
   t.classList.remove("ok");
   clearTimeout(showError._h);
-  showError._h = setTimeout(() => t.classList.add("hidden"), 6000);
+  showError._h = setTimeout(() => t.classList.add("hidden"), TOAST_MS);
 }
 
 // wrap every UI action: API errors (400/500/...) land in the toast
@@ -1476,6 +1537,8 @@ async function startSession() {
     // pomodoro: pre-fill the focus duration from settings (pause stays manual in the GUI)
     minutes = (state.settings && state.settings.general.pomodoro_focus_min) || 25;
   }
+  if ($("#session-pomodoro").checked && window.Notification && Notification.permission === "default")
+    Notification.requestPermission(); // for the end-of-session desktop notification
   await api.post("/api/session/start", {
     kind,
     task_id: taskId ? parseInt(taskId, 10) : null,
@@ -1501,6 +1564,7 @@ function openModal() {
   $("#modal").classList.remove("hidden");
   $("#f-path").value = "";
   $("#f-detect").textContent = "";
+  $("#f-langs").value = "";
   $("#f-name").focus();
 }
 function closeModal() { $("#modal").classList.add("hidden"); restoreFocus(); }
@@ -1538,6 +1602,7 @@ async function createProject() {
     color: $("#f-color").value,
     status: $("#f-status").value,
     description: $("#f-desc").value,
+    languages: parseLangs($("#f-langs").value),
     set_active: true,
   };
   const path = $("#f-path").value.trim();
@@ -1560,6 +1625,7 @@ function openEditModal(p) {
   $("#e-name").value = p.name;
   $("#e-engine").value = p.engine;
   $("#e-color").value = cssColor(p.color);
+  $("#e-langs").value = (p.languages || []).join(", ");
   $("#e-status").value = p.status;
   $("#e-desc").value = p.description || "";
   $("#e-archived").checked = !!p.archived;
@@ -1583,6 +1649,7 @@ async function saveEditProject() {
     name,
     engine: $("#e-engine").value,
     color: $("#e-color").value,
+    languages: parseLangs($("#e-langs").value),
     status: $("#e-status").value,
     description: $("#e-desc").value,
     archived: $("#e-archived").checked,
@@ -1601,7 +1668,7 @@ async function deleteEditProject() {
     delBtn.textContent = T("gui.edit.delete_confirm");
     delBtn.classList.add("btn-danger-armed");
     $("#e-delete-warn").classList.remove("hidden");
-    setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = T("gui.edit.delete"); delBtn.classList.remove("btn-danger-armed"); $("#e-delete-warn").classList.add("hidden"); }, 6000);
+    setTimeout(() => { delBtn.dataset.armed = ""; delBtn.textContent = T("gui.edit.delete"); delBtn.classList.remove("btn-danger-armed"); $("#e-delete-warn").classList.add("hidden"); }, ARM_LONG_MS);
     return;
   }
   await api.post("/api/projects/delete", { ref });
@@ -1685,7 +1752,7 @@ $("#btn-delete-task").onclick = () => {
       btn.dataset.armed = "";
       btn.textContent = T("gui.task.delete");
       btn.classList.remove("btn-danger-armed");
-    }, 6000);
+    }, ARM_LONG_MS);
     return;
   }
   runAction(async () => {
@@ -1821,12 +1888,19 @@ api.get("/api/i18n")
     loadSettings().catch(() => {});
     loadAll().then(() => {
       switchTab(state.tab);
+      // the help shortcut doc must match the number of VISIBLE tabs (AI tab can be hidden)
+      const htm = $("help-tabs-max");
+      if (htm) htm.textContent = String(tabOrder().length);
       return api.get("/api/status").then((s) => { state.lastEventId = s.last_event_id || 0; });
-    });
+    }).catch(() => {}); // a failed boot load must not stay an unhandled rejection
   });
 // adaptive polling: fast while visible, slow while the tab/window is hidden
 // (the connection dot still updates, but we stop hammering the API)
+// 1.5s visible / 10s hidden is plenty -- no need to over-engineer this
 const POLL_FAST_MS = 1500, POLL_HIDDEN_MS = 10000;
+// UI timers: arm window for destructive buttons, toast display, palette sizes
+const ARM_MS = 5000, ARM_LONG_MS = 6000, TOAST_MS = 6000;
+const PALETTE_MAX = 40, PALETTE_TASKS = 30, PALETTE_LOGS = 10, DEFAULT_AI_CONTEXT_MAX = 6000;
 async function pollLoop() {
   await pollEvents();
   setTimeout(pollLoop, document.hidden ? POLL_HIDDEN_MS : POLL_FAST_MS);
@@ -1926,11 +2000,11 @@ function paletteItems(query) {
   for (const c of paletteCommands()) {
     if (match(c.label)) items.push({ sectionKey: "cmd", section: "gui.palette.cmd", label: c.label, run: c.run });
   }
-  for (const t of state.tasks.filter((x) => x.status !== "done" && x.status !== "cancelled").slice(0, 30)) {
+  for (const t of state.tasks.filter((x) => x.status !== "done" && x.status !== "cancelled").slice(0, PALETTE_TASKS)) {
     const label = T("gui.cmd.open_task", { id: t.id, title: t.title });
     if (match(label)) items.push({ sectionKey: "tasks", section: "gui.palette.tasks", label, run: () => { switchTab("tasks"); openTaskModal(t); } });
   }
-  for (const e of (state.logs || []).slice(0, 10)) {
+  for (const e of (state.logs || []).slice(0, PALETTE_LOGS)) {
     const label = e.content.slice(0, 80);
     if (match(label)) items.push({ sectionKey: "logs", section: "gui.palette.logs", label, run: () => {
       switchTab("log");
@@ -1955,7 +2029,7 @@ function paletteItems(query) {
       await loadAll();
     }) });
   }
-  return items.slice(0, 40);
+  return items.slice(0, PALETTE_MAX);
 }
 
 function openPalette() {
@@ -2037,13 +2111,14 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     // close the topmost open layer
     if (!$("#modal-task").classList.contains("hidden")) return closeTaskModal();
+    if (!$("#modal-feat").classList.contains("hidden")) return closeFeatModal();
     if (!$("#modal-edit").classList.contains("hidden")) return closeEditModal();
     if (!$("#modal").classList.contains("hidden")) return closeModal();
     if (!$("#modal-help").classList.contains("hidden")) return closeHelp();
     return;
   }
   // while a modal is open, single-key shortcuts stay out of the way (except Esc above)
-  const modalOpen = ["#modal", "#modal-edit", "#modal-task", "#modal-help"]
+  const modalOpen = ["#modal", "#modal-edit", "#modal-task", "#modal-feat", "#modal-help"]
     .some((sel) => !$(sel).classList.contains("hidden"));
   if (modalOpen) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -2094,3 +2169,33 @@ $("#btn-copy-task-id").onclick = () => {
     navigator.clipboard.writeText(txt).then(() => notify(T("gui.copied")), () => notify(T("gui.copied")));
   else notify(T("gui.copied"));
 };
+
+/* ---------- finishing touches: chart PNG export + open the data folder ---------- */
+
+// download all stats charts as one PNG (charts render on a dark canvas already)
+$("#btn-stats-png").onclick = () => runAction(async () => {
+  const ids = ["chart-time", "chart-done", "chart-tags", "chart-progress", "chart-projects"];
+  const canvases = ids.map((id) => document.getElementById(id)).filter((c) => c && c.width > 0);
+  if (!canvases.length) return;
+  const w = Math.max(...canvases.map((c) => c.width));
+  const h = canvases.reduce((a, c) => a + c.height + 16, 0);
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext("2d");
+  ctx.fillStyle = "#0f1115";
+  ctx.fillRect(0, 0, w, h);
+  let y = 0;
+  for (const c of canvases) { ctx.drawImage(c, 0, y); y += c.height + 16; }
+  const a = document.createElement("a");
+  a.download = "devdash-stats.png";
+  a.href = out.toDataURL("image/png");
+  a.click();
+  notify(T("gui.stats.png_done"));
+});
+
+// reveal DEVDASH_HOME in the OS file explorer (user-initiated local action)
+$("#btn-open-home").onclick = () => runAction(async () => {
+  const r = await api.post("/api/open-home", { open: true });
+  notify(T("gui.toast.open_home", { path: r.path }));
+});

@@ -1,7 +1,4 @@
-"""AI assistant tests — all with the deterministic "mock" provider,
-no network. Verifies: disabled-by-default, plan propose-vs-apply (no write
-without consent), verdict proposes but NEVER marks done, context hygiene.
-"""
+# tests -- ai
 
 from __future__ import annotations
 

@@ -1,5 +1,3 @@
-"""Regression tests for the second full audit (core + CLI + MCP + GUI fixes)."""
-
 from __future__ import annotations
 
 import json

@@ -1,16 +1,9 @@
-"""Append-only event bus used for realtime updates.
-
-Every core mutation calls `append(...)`. The GUI polls `since(last_id)` to
-refresh without restart; the CLI can watch it with `devdash status --watch`.
-"""
-
 from __future__ import annotations
 
 import json
 import sqlite3
 
 from .models import Event, now_iso
-
 
 def append(
     conn: sqlite3.Connection,

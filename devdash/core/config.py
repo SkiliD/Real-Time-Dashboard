@@ -1,13 +1,5 @@
-"""DevDash configuration: paths (DEVDASH_HOME) + config.json handling.
-
-Configuration (AI keys, toggles, commit-parsing patterns, pomodoro defaults)
-lives in <DEVDASH_HOME>/config.json -- deliberately SEPARATE from the project
-data (devdash.db), so data backups never contain API keys.
-
-DEVDASH_HOME defaults to ~/.devdash (Windows: %USERPROFILE%\\.devdash) and can
-be overridden with the DEVDASH_HOME environment variable, e.g. to point at a
-synced folder (OneDrive/Dropbox/USB) for portability between machines.
-"""
+# DEVDASH_HOME paths + config.json (tolerant loader)
+# Read-only on purpose.
 
 from __future__ import annotations
 

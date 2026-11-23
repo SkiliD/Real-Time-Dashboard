@@ -1,8 +1,4 @@
-"""Devlog entries (core): dated, searchable long-term memory.
-
-Entries attach to the active project by default, optionally to a task.
-They are never hard-deleted (append-only journal); edits go through update().
-"""
+"""devlog entries"""
 
 from __future__ import annotations
 

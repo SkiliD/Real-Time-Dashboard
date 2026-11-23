@@ -1,4 +1,4 @@
-"""`devdash projects ...` commands."""
+# devdash projects ...
 
 from __future__ import annotations
 
@@ -64,6 +64,7 @@ def create_project(
     engine: str = typer.Option("other", "--engine", "-e",
                                 help=tr("opt.engine", list=", ".join(_ENGINES))),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
+    lang: list[str] = typer.Option([], "--lang", "-l", help=tr("opt.langs")),
     status: str = typer.Option("idea", "--status", "-s",
                                 help=tr("opt.status", list=", ".join(_STATUSES))),
     set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
@@ -71,7 +72,7 @@ def create_project(
     """Create a new project."""
     conn = get_conn(ctx)
     project = guard(core.create, conn, name, description=description, engine=engine,
-                    color=color, status=status)
+                    color=color, status=status, languages=lang)
     if set_active:
         guard(core.set_active, conn, project.id)
     emit(ctx, project.to_dict(), lambda: console.print(
@@ -89,6 +90,7 @@ def connect_project(
     engine: str = typer.Option("", "--engine", "-e",
                                 help=tr("opt.engine", list=", ".join(_ENGINES)) + " " + tr("opt.engine_auto")),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
+    lang: list[str] = typer.Option([], "--lang", "-l", help=tr("opt.langs")),
     status: str = typer.Option("idea", "--status", "-s",
                                 help=tr("opt.status", list=", ".join(_STATUSES))),
     set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
@@ -107,7 +109,8 @@ def connect_project(
     if eng not in _ENGINES:
         raise typer.BadParameter(tr("err.bad_engine", engine=eng, list=", ".join(_ENGINES)))
     project = guard(core.create, conn, name or info["name"] or info["path"],
-                    description=description, engine=eng, color=color, status=status)
+                    description=description, engine=eng, color=color, status=status,
+                    languages=lang)
     if set_active:
         guard(core.set_active, conn, project.id)
     git_root = None
@@ -154,6 +157,8 @@ def show_project(
     def render() -> None:
         console.print(f"[bold {project.color}]●[/] [bold]{project.name}[/] "
                       f"([dim]{project.slug}[/]) — {project.engine} · {project.status}")
+        if project.languages:
+            console.print(tr("projects.show.langs", langs=", ".join(project.languages)))
         if project.description:
             console.print(project.description)
         console.print(tr("projects.show.tasks", todo=by_status["todo"],
@@ -171,12 +176,14 @@ def update_project(
     description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
     engine: str | None = typer.Option(None, "--engine", "-e", help=tr("opt.engine", list=", ".join(_ENGINES))),
     color: str | None = typer.Option(None, "--color", "-c", help=tr("opt.color")),
+    lang: list[str] | None = typer.Option(None, "--lang", "-l", help=tr("opt.langs")),
     status: str | None = typer.Option(None, "--status", "-s",
                                        help=tr("opt.status", list=", ".join(_STATUSES))),
 ) -> None:
     """Update project fields (e.g. --status beta)."""
     conn = get_conn(ctx)
     project = guard(core.update, conn, int(ref) if ref.isdigit() else ref, name=name,
+                    languages=lang,
                     description=description, engine=engine, color=color, status=status)
     emit(ctx, project.to_dict(), lambda: console.print(
         tr("projects.updated", slug=project.slug, status=project.status)

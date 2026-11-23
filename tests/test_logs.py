@@ -1,5 +1,6 @@
-"""Core devlog tests: add (default active project), search, list
-filters, update, events.
+"""tests -- logs
+
+Small on purpose -- it has to stay fast.
 """
 
 from __future__ import annotations

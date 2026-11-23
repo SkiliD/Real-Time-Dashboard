@@ -1,11 +1,5 @@
-"""OpenAI-compatible chat provider (Mistral AI, OpenAI, or any /v1 endpoint).
-
-Stdlib only (urllib). Endpoint/key/model come from config.json:
-  ai_provider = "mistral" | "openai" | "openai_compat"
-  ai_base_url = "https://api.mistral.ai/v1"   (override)
-  ai_api_key  = "..."                         (never hardcoded)
-  ai_model    = "mistral-small-latest"
-"""
+# any OpenAI-compatible endpoint (LM Studio, llama.cpp, ...)
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 

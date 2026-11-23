@@ -1,9 +1,4 @@
-"""GUI settings tab (general settings + one-click backup) + HTTP end-to-end.
-
-Covers: /api/settings read (API key stays write-only), validation of every
-general field, persistence to config.json, hot language switch via /api/i18n,
-and POST /api/backup producing a real zip (db + config.json).
-"""
+"""tests -- settings gui"""
 
 from __future__ import annotations
 

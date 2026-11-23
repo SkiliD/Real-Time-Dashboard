@@ -1,7 +1,3 @@
-"""GUI gap-fill batch: task editing/search/subtasks, editable+deletable devlog,
-per-task git filter, feature detach, JSON export, demo seed — API + HTTP + core.
-"""
-
 from __future__ import annotations
 
 import json

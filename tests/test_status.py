@@ -1,4 +1,7 @@
-"""Stats + status snapshot tests."""
+"""tests -- status
+
+If it breaks, the tests will say so.
+"""
 
 from __future__ import annotations
 

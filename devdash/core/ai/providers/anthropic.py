@@ -1,15 +1,6 @@
-"""Anthropic (Claude) cloud provider — Messages API, stdlib only (urllib).
+"""Claude API (cloud, opt-in)
 
-The Anthropic API is NOT OpenAI-compatible: different endpoint
-(/v1/messages), auth header (x-api-key), a mandatory max_tokens, and the
-system prompt is a top-level field, not a message. This provider handles
-that translation.
-
-config.json:
-  ai_provider = "anthropic"
-  ai_api_key  = "sk-ant-..."            (never hardcoded, never logged)
-  ai_model    = "claude-sonnet-4-5"     (or any Claude model id)
-  ai_base_url = "https://api.anthropic.com"   (optional override)
+If it breaks, the tests will say so.
 """
 
 from __future__ import annotations

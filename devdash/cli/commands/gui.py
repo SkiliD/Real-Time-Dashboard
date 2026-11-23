@@ -1,4 +1,5 @@
-"""`devdash gui` command: launch the graphical interface."""
+# devdash gui -- native window, or --browser
+# Read-only on purpose.
 
 from __future__ import annotations
 

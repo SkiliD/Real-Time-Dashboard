@@ -3,6 +3,7 @@
 DevDash is a small **personal dashboard that lives on your computer** to help you
 track your projects — game dev, web, anything. It shows your tasks, how much time
 you spend working, your notes, and what your Git commits say, all in one place.
+I built it for my own game projects — if it fits yours too, great.
 
 There is a **command line** for quick actions and a **desktop app** for everything
 else. Both share the same data, so anything you do in one appears instantly in the
@@ -64,6 +65,15 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[gui,test]"
 ```
 
+The native window (PyWebView) needs one system package on **Linux** — WebKit2GTK:
+```bash
+# Debian/Ubuntu:  sudo apt install python3-gi gir1.2-webkit2-4.1
+# Fedora:         sudo dnf install webkit2gtk4.1 python3-gobject
+# Arch:           sudo pacman -S webkit2gtk python-gobject
+```
+On **macOS** nothing extra is needed. On a headless server (no display), just use
+`devdash gui --browser` — it opens in your browser, same app.
+
 Or without a virtualenv: `pipx install .`
 
 > **Windows — AppLocker/WDAC note**: if `devdash` fails with *"an application control
@@ -79,12 +89,23 @@ Handy alias (optional): `alias dd='devdash'` in your `~/.bashrc` / `~/.zshrc`
 
 ```bash
 pip install -e ".[build]"
-py -3 scripts/build_exe.py        # -> dist/devdash.exe (Windows) / dist/devdash (macOS/Linux)
+py -3 scripts/build_exe.py        # -> dist/devdash/devdash.exe (Windows) / dist/devdash/ (macOS/Linux)
 ```
 
-Build it on the OS where you'll use it. The result is one double-clickable file —
-put it on a USB stick if you want. (`--onedir` for a folder build, `--no-gui` for a
-smaller CLI-only build.)
+Build it on the OS where you'll use it. The result is a folder with one
+double-clickable exe inside — put the folder on a USB stick if you want.
+Flags: `--onefile` for a single file, `--no-gui` for a smaller CLI-only build,
+`--no-console` for a windowed exe (no console flash).
+
+> **Windows SmartScreen / antivirus**: the exe is *unsigned*, so the first launch may
+> show "Windows protected your PC" — click **More info → Run anyway**. The build is
+> AV-friendly by construction (onedir folder instead of a self-extracting onefile, UPX
+> off, Windows version metadata + `asInvoker` manifest embedded), but only a *trusted
+> code-signing certificate* removes the warning for good:
+> `.\scripts\sign_exe.ps1 -ExePath "dist\devdash\devdash.exe"`.
+> DevDash is local-only: no account, no telemetry, no network calls except an explicit
+> `git fetch`/AI provider call you trigger yourself. To whitelist in Defender:
+> *Windows Security → Virus & threat protection → Exclusions → add the `dist\devdash` folder*.
 
 ## First steps
 

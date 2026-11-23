@@ -1,11 +1,5 @@
-"""Regression tests for core/GUI correctness and security fixes.
-
-Covers: detach no-op, cross-project feature
-resolution, parent cycles, LIKE wildcards, events_since cursor, plan JSON
-validation, server Host/Content-Type hardening, active-project scoping of
-GUI list endpoints, UTC normalization of git timestamps, config resilience,
-color validation, local-day bucketing.
-"""
+# tests -- review fixes
+# Works on Windows, Mac and Linux.
 
 from __future__ import annotations
 
