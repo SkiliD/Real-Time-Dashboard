@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 
@@ -32,10 +33,13 @@ class CliProvider(AIProvider):
         if not argv:
             raise AIError("cli provider: ai_cli_command is empty")
         payload = json.dumps({"messages": messages, "temperature": temperature})
+        # force UTF-8 on the child's pipes: on Windows the default locale (cp1252)
+        # would mangle accents in both directions
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         try:
             proc = subprocess.run(
                 argv, input=payload.encode("utf-8"),
-                capture_output=True, timeout=self.timeout, shell=False,
+                capture_output=True, timeout=self.timeout, shell=False, env=env,
             )
         except FileNotFoundError as e:
             raise AIError(f"cli provider: executable not found: {argv[0]!r}") from e

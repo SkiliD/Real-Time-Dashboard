@@ -51,6 +51,8 @@ def _folder_picker_command(title: str, platform: str | None = None) -> list[str]
                 "--", title]
     if shutil.which("zenity"):
         return ["zenity", "--file-selection", "--directory", f"--title={title}"]
+    if shutil.which("kdialog"):
+        return ["kdialog", "--getexistingdirectory", ".", f"--title={title}"]
     return None
 
 

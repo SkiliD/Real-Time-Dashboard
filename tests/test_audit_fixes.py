@@ -335,6 +335,8 @@ def test_api_fs_pick_directory(monkeypatch, api):
             self.returncode = 0
 
     monkeypatch.setattr(apimod.subprocess, "run", lambda *a, **k: _R("/home/danny/Games/aether-vale\n"))
+    # CI runners (Linux) have no zenity installed: pretend it exists
+    monkeypatch.setattr(apimod.shutil, "which", lambda c: f"/usr/bin/{c}")
     assert api.fs_pick_directory({"title": "x"}) == {"path": "/home/danny/Games/aether-vale"}
     monkeypatch.setattr(apimod.subprocess, "run", lambda *a, **k: _R(""))
     assert api.fs_pick_directory({}) == {"path": None}  # cancelled dialog

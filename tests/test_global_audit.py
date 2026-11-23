@@ -94,3 +94,39 @@ def test_help_tab_count_is_dynamic():
 def test_appjs_named_timer_constants():
     assert "ARM_MS" in APP_JS and "TOAST_MS" in APP_JS and "PALETTE_MAX" in APP_JS
     assert "}, 5000);" not in APP_JS and "}, 6000);" not in APP_JS
+
+
+def test_folder_picker_linux_fallbacks(monkeypatch):
+    """Linux CI runners have neither zenity nor kdialog: the command builder must
+    degrade zenity -> kdialog -> None instead of crashing."""
+    from devdash.gui import api as apimod
+    monkeypatch.setattr(apimod.shutil, "which", lambda c: "/usr/bin/zenity" if c == "zenity" else None)
+    assert apimod._folder_picker_command("t", "linux")[0] == "zenity"
+    monkeypatch.setattr(apimod.shutil, "which", lambda c: "/usr/bin/kdialog" if c == "kdialog" else None)
+    assert apimod._folder_picker_command("t", "linux")[0] == "kdialog"
+    monkeypatch.setattr(apimod.shutil, "which", lambda c: None)
+    assert apimod._folder_picker_command("t", "linux") is None
+    assert apimod._folder_picker_command("t", "darwin")[0] == "osascript"
+
+
+def test_cli_provider_forces_utf8_child(home, conn, tmp_path):
+    """The CLI-AI subprocess must run with UTF-8 pipes, otherwise accents break
+    on Windows runners whose console locale is cp1252 (seen in CI)."""
+    import shlex
+    import sys
+    from devdash.core import config as cfgmod
+    from devdash.core.ai import assistant
+    p = projects.create(conn, "demo")
+    projects.set_active(conn, p.id)
+    script = tmp_path / "enc.py"
+    script.write_text(
+        "import sys, json\njson.load(sys.stdin)\nprint('ENC:' + sys.stdout.encoding.lower())\n",
+        encoding="utf-8",
+    )
+    cfg = cfgmod.load_config(home)
+    cfg.ai_enabled = True
+    cfg.ai_provider = "cli"
+    cfg.ai_cli_command = shlex.join([sys.executable, str(script)])
+    cfgmod.save_config(cfg, home)
+    r = assistant.ask(conn, "où en suis-je ?", home=home)
+    assert "utf-8" in r["answer"]
