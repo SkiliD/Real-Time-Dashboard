@@ -12,7 +12,7 @@ from rich.table import Table
 from devdash.core import features as feats
 from devdash.core import tasks as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, guard, resolve_project
+from ..deps import get_conn, guard, resolve_project, read_text_file
 from ..output import emit
 
 app = typer.Typer(help=tr("group.task.help"))
@@ -56,6 +56,7 @@ def add_task(
     title: str = typer.Argument(..., help=tr("opt.title")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project")),
     description: str = typer.Option("", "--description", "-d"),
+    desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
     priority: str = typer.Option("medium", "--priority",
                                  help=tr("opt.priority", list=", ".join(core.VALID_PRIORITIES))),
     tag: list[str] = typer.Option([], "--tag", "-t", help=tr("opt.tag")),
@@ -65,7 +66,7 @@ def add_task(
     """Add a task to a project (default: the active project)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    task = guard(core.add, conn, proj.id, title, description=description, priority=priority,
+    task = guard(core.add, conn, proj.id, title, description=read_text_file(desc_file) if desc_file else description, priority=priority,
                  estimate_min=est, tags=tag, parent_id=parent)
     data = {**task.to_dict(), "project": proj.slug}
 
@@ -175,6 +176,7 @@ def edit_task(
     task_id: int,
     title: str | None = typer.Option(None, "--title", help=tr("opt.title")),
     description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
+    desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
     priority: str | None = typer.Option(None, "--priority",
                                          help=tr("opt.priority", list=", ".join(core.VALID_PRIORITIES))),
     est: int | None = typer.Option(None, "--est", "--estimate", help=tr("opt.est")),
@@ -187,7 +189,9 @@ def edit_task(
     changes: dict = {}
     if title is not None:
         changes["title"] = title
-    if description is not None:
+    if desc_file is not None:
+        changes["description"] = read_text_file(desc_file)
+    elif description is not None:
         changes["description"] = description
     if priority is not None:
         changes["priority"] = priority

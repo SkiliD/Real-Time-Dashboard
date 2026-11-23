@@ -10,7 +10,7 @@ import sqlite3
 import unicodedata
 
 from . import events
-from .models import Project, now_iso
+from .models import Project, check_text, now_iso
 
 VALID_STATUSES = ("idea", "design", "prototype", "development", "beta", "done", "paused")
 # engine is a free label; these are just the common ones suggested by the CLI/GUI
@@ -82,6 +82,7 @@ def create(
     if not isinstance(name, str) or not name.strip():
         raise ValueError("project name is required (non-empty)")
     name = name.strip()
+    description = check_text(description or "", "description")
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
     if not isinstance(engine, str) or not engine.strip() or len(engine) > 40:
@@ -179,6 +180,8 @@ def update(
         raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
     if color is not None:
         color = _validate_color(color)
+    if description is not None:
+        description = check_text(description, "description")
     if engine is not None and (not isinstance(engine, str) or not engine.strip() or len(engine) > 40):
         raise ValueError("engine must be a non-empty string of at most 40 characters")
     if name is not None and (not isinstance(name, str) or not name.strip()):

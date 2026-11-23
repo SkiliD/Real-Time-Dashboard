@@ -7,7 +7,7 @@ import sqlite3
 
 from . import events, projects
 from . import tasks as tsk
-from .models import Feature, now_iso
+from .models import Feature, check_text, now_iso
 
 VALID_STATUSES = ("open", "proposed", "done", "rejected")
 
@@ -16,6 +16,7 @@ def create(conn: sqlite3.Connection, project_id: int, name: str, description: st
     name = name.strip()
     if not name:
         raise ValueError("feature name is empty")
+    description = check_text(description or "", "description")
     if projects.get(conn, project_id) is None:
         raise KeyError(f"no project with id {project_id}")
     with conn:  # row + event in one transaction
@@ -232,6 +233,7 @@ def update(
         fields.append("name = ?")
         values.append(name)
     if description is not None:
+        description = check_text(description, "description")
         fields.append("description = ?")
         values.append(description)
     if fields:

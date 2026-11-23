@@ -16,6 +16,7 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 MAX_SEARCH_LIMIT = 200
 MAX_TITLE_LEN = 100_000  # same cap as the GUI API (_str max_len)
+MAX_TEXT_LEN = 100_000   # descriptions / devlog: long-term notes welcome
 
 # one DB connection per stdio process (the loop is single-threaded)
 _CONN = None
@@ -53,6 +54,7 @@ TOOLS = [
     _tool("devdash_task_add", "Add a task to the active (or given) project.",
           {"title": {"type": "string"}, "priority": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
            "tags": {"type": "array", "items": {"type": "string"}},
+           "description": {"type": "string"},
            "estimate_min": {"type": "integer"}, "project": {"type": "string"}},
           ["title"]),
     _tool("devdash_task_set_status", "Set a task status (todo/in_progress/done/cancelled).",
@@ -134,7 +136,10 @@ def _call(name: str, args: dict, home: Path | None) -> dict:
             raise ValueError("title is required")
         if len(title) > MAX_TITLE_LEN:
             raise ValueError(f"title too long (max {MAX_TITLE_LEN} chars)")
-        t = tsk.add(conn, proj.id, title,
+        desc = args.get("description") or ""
+        if len(desc) > MAX_TEXT_LEN:
+            raise ValueError(f"description too long (max {MAX_TEXT_LEN} chars)")
+        t = tsk.add(conn, proj.id, title, description=desc,
                     priority=args.get("priority", "medium"),
                     estimate_min=est,
                     tags=args.get("tags") or [])

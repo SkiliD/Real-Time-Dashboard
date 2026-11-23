@@ -9,7 +9,7 @@ from rich.table import Table
 from devdash.core import projects as core
 from devdash.core import tasks as core_tasks
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, guard
+from ..deps import get_conn, guard, read_text_file
 from ..output import emit
 
 app = typer.Typer(help=tr("group.projects.help"))
@@ -61,6 +61,7 @@ def create_project(
     ctx: typer.Context,
     name: str = typer.Argument(..., help=tr("opt.name")),
     description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
+    desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
     engine: str = typer.Option("other", "--engine", "-e",
                                 help=tr("opt.engine", list=", ".join(_ENGINES))),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
@@ -71,7 +72,7 @@ def create_project(
 ) -> None:
     """Create a new project."""
     conn = get_conn(ctx)
-    project = guard(core.create, conn, name, description=description, engine=engine,
+    project = guard(core.create, conn, name, description=read_text_file(desc_file) if desc_file else description, engine=engine,
                     color=color, status=status, languages=lang)
     if set_active:
         guard(core.set_active, conn, project.id)
@@ -174,6 +175,7 @@ def update_project(
     ref: str = typer.Argument(..., help=tr("opt.ref_project")),
     name: str | None = typer.Option(None, "--name", help=tr("opt.name")),
     description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
+    desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
     engine: str | None = typer.Option(None, "--engine", "-e", help=tr("opt.engine", list=", ".join(_ENGINES))),
     color: str | None = typer.Option(None, "--color", "-c", help=tr("opt.color")),
     lang: list[str] | None = typer.Option(None, "--lang", "-l", help=tr("opt.langs")),
@@ -184,7 +186,7 @@ def update_project(
     conn = get_conn(ctx)
     project = guard(core.update, conn, int(ref) if ref.isdigit() else ref, name=name,
                     languages=lang,
-                    description=description, engine=engine, color=color, status=status)
+                    description=(read_text_file(desc_file) if desc_file else description), engine=engine, color=color, status=status)
     emit(ctx, project.to_dict(), lambda: console.print(
         tr("projects.updated", slug=project.slug, status=project.status)
     ))

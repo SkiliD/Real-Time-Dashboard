@@ -661,8 +661,21 @@ function taskCard(t) {
     e.dataTransfer.setData("text/plain", String(t.id));
     e.dataTransfer.effectAllowed = "move";
     card.classList.add("dragging");
+    document.body.classList.add("dnd-active");
+    // custom ghost: a lifted, slightly rotated clone follows the cursor
+    // (the default drag image is a flat snapshot of the source card)
+    const ghost = card.cloneNode(true);
+    ghost.classList.remove("dragging");
+    ghost.classList.add("drag-ghost");
+    ghost.style.width = card.offsetWidth + "px";
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 24);
+    requestAnimationFrame(() => ghost.remove()); // the image is snapshotted synchronously
   });
-  card.addEventListener("dragend", () => card.classList.remove("dragging"));
+  card.addEventListener("dragend", () => {
+    card.classList.remove("dragging");
+    document.body.classList.remove("dnd-active");
+  });
   return card;
 }
 
@@ -674,7 +687,15 @@ function wireKanbanDnD() {
     // enter/leave counter: dragleave fires when entering a child card too,
     // which made the hover highlight flicker
     col.addEventListener("dragenter", (e) => { e.preventDefault(); col._dragDepth = (col._dragDepth || 0) + 1; col.classList.add("drop-hover"); });
-    col.addEventListener("dragover", (e) => e.preventDefault());
+    col.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      // auto-scroll the column when the cursor nears its top/bottom edge
+      const r = target.getBoundingClientRect();
+      const EDGE = 40, STEP = 30;
+      if (e.clientY < r.top + EDGE) target.scrollBy({ top: -STEP, behavior: "smooth" });
+      else if (e.clientY > r.bottom - EDGE) target.scrollBy({ top: STEP, behavior: "smooth" });
+    });
     col.addEventListener("dragleave", () => { col._dragDepth = Math.max(0, (col._dragDepth || 0) - 1); if (!col._dragDepth) col.classList.remove("drop-hover"); });
     col.addEventListener("drop", (e) => {
       e.preventDefault();
@@ -687,7 +708,12 @@ function wireKanbanDnD() {
       if (task && task.status === status) return; // no-op drop: no event, no reload
       runAction(async () => {
         await api.post("/api/tasks/status", { id: parseInt(id, 10), status });
+        // small visual feedback: flash the target column, pop the landed card
+        col.classList.add("drop-flash");
+        setTimeout(() => col.classList.remove("drop-flash"), 460);
         await loadAll();
+        const landed = col.querySelector(`[data-task-id="${id}"]`);
+        if (landed) landed.classList.add("landed");
       });
     });
   });
@@ -1815,7 +1841,10 @@ $("#sess-minus").onclick = () => bumpSessionMinutes(-5);
 $("#sess-plus").onclick = () => bumpSessionMinutes(5);
 $("#session-note").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(stopSession); });
 $("#btn-add-log").onclick = () => runAction(addLog);
-$("#log-content").addEventListener("keydown", (e) => { if (e.key === "Enter") runAction(addLog); });
+$("#log-content").addEventListener("keydown", (e) => {
+  // multiline entry: Enter makes a new line, Ctrl/Cmd+Enter sends it
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runAction(addLog); }
+});
 let logSearchTimer = null;
 $("#log-search").addEventListener("input", (e) => {
   state.logQuery = e.target.value;
@@ -1908,6 +1937,16 @@ async function pollLoop() {
 pollLoop();
 
 /* ---------- utils ---------- */
+
+// long descriptions: textareas grow with their content while typing (capped,
+// then they scroll internally)
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el && el.classList && el.classList.contains("desc-input")) {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 400) + "px";
+  }
+});
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>

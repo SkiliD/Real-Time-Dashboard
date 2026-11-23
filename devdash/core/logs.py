@@ -6,7 +6,7 @@ import json
 import sqlite3
 
 from . import events, projects
-from .models import LogEntry, escape_like, now_iso
+from .models import LogEntry, check_text, escape_like, now_iso
 
 
 def add(
@@ -16,7 +16,7 @@ def add(
     task_id: int | None = None,
     tags: list[str] | tuple[str, ...] = (),
 ) -> LogEntry:
-    content = content.strip()
+    content = check_text(content.strip(), "content")
     if not content:
         raise ValueError("log entry content is empty")
     if project_id is None:
@@ -91,6 +91,7 @@ def update(
         raise KeyError(f"no log entry #{entry_id}")
     fields, values = [], []
     if content is not None:
+        content = check_text(content, "content")
         if not content.strip():
             raise ValueError("log entry content is empty")
         fields.append("content = ?")

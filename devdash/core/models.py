@@ -9,6 +9,18 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# --- text length caps (long descriptions are a feature, but unbounded is not) --
+MAX_TITLE_LEN = 1_000
+MAX_TEXT_LEN = 100_000  # descriptions / devlog entries: room for long-term notes
+
+
+def check_text(value: str, field: str, max_len: int = MAX_TEXT_LEN) -> str:
+    """Cap a user text field; raise a clean ValueError when it is too long."""
+    if value is not None and len(value) > max_len:
+        raise ValueError(f"{field} too long (max {max_len} chars, got {len(value)})")
+    return value
+
+
 # --- local-day helpers -------------------------------------------------------
 # Timestamps are stored in UTC, but "today"/streaks/day buckets are computed in
 # the user's LOCAL timezone (converted to UTC for comparison with stored values),

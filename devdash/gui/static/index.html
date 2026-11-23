@@ -113,7 +113,7 @@
 
     <section id="tab-log" class="tab-page hidden">
       <div id="log-toolbar">
-        <input id="log-content" type="text" data-i18n-ph="gui.log_ph" placeholder="Nouvelle entrée de devlog… (Entrée pour ajouter)">
+        <textarea id="log-content" rows="2" class="desc-input" maxlength="100000" data-i18n-ph="gui.log_ph" placeholder="Nouvelle entrée de devlog… (Ctrl+Entrée pour ajouter)"></textarea>
         <input id="log-tags" type="text" data-i18n-ph="gui.tags_ph" placeholder="Tags (séparés par des virgules)">
         <button id="btn-add-log" class="btn" data-i18n="gui.add">Ajouter</button>
         <span class="spacer"></span>
@@ -336,7 +336,7 @@
         <option value="beta" data-i18n="pstatus.beta">Beta</option><option value="done" data-i18n="pstatus.done">Terminé</option><option value="paused" data-i18n="pstatus.paused">En pause</option>
       </select>
     </label>
-    <label><span data-i18n="gui.modal.desc">Description</span> <input id="e-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <textarea id="e-desc" rows="5" class="desc-input" maxlength="100000" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></textarea></label>
     <label class="chk"><input type="checkbox" id="e-archived"> <span data-i18n="gui.proj.archived">Archivé (masqué de la liste)</span></label>
     <p class="dim small hidden" id="e-delete-warn" data-i18n="gui.edit.delete_warn"></p>
     <div class="modal-actions">
@@ -352,7 +352,7 @@
   <div class="modal-card">
     <h3 id="feat-modal-title">Modifier la feature</h3>
     <label><span data-i18n="gui.modal.name">Nom</span> <input id="ft-name" type="text"></label>
-    <label><span data-i18n="gui.modal.desc">Description</span> <input id="ft-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <textarea id="ft-desc" rows="4" class="desc-input" maxlength="100000" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></textarea></label>
     <div class="modal-actions">
       <button id="btn-feat-delete" class="btn btn-danger" data-i18n="gui.edit.delete">Supprimer…</button>
       <span class="spacer"></span>
@@ -366,7 +366,7 @@
   <div class="modal-card">
     <h3 id="task-modal-title"><span id="task-modal-title-text">Modifier la tâche</span> <button id="btn-copy-task-id" class="mini-btn" data-i18n-title="gui.copy_id" title="Copier l’identifiant">⧉</button></h3>
     <label><span data-i18n="gui.modal.name">Titre</span> <input id="t-title" type="text"></label>
-    <label><span data-i18n="gui.modal.desc">Description</span> <input id="t-desc" type="text" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></label>
+    <label><span data-i18n="gui.modal.desc">Description</span> <textarea id="t-desc" rows="6" class="desc-input" maxlength="100000" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></textarea></label>
     <label><span data-i18n="gui.task.priority">Priorité</span>
       <select id="t-priority">
         <option value="low" data-i18n="prio.low">Basse</option>

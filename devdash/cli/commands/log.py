@@ -11,7 +11,7 @@ from rich.table import Table
 
 from devdash.core import logs as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, guard, resolve_project
+from ..deps import get_conn, guard, resolve_project, read_text_file
 from ..output import emit
 
 app = typer.Typer(help=tr("group.log.help"))
@@ -21,7 +21,8 @@ console = Console()
 @app.command("add", help=tr("log.add.help"))
 def add_log(
     ctx: typer.Context,
-    content: str = typer.Argument(..., help=tr("opt.content")),
+    content: str = typer.Argument("", help=tr("opt.content")),
+    content_file: str | None = typer.Option(None, "--content-file", help=tr("opt.content_file")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
     task: int | None = typer.Option(None, "--task", "-t", help=tr("opt.task_attach")),
     tag: list[str] = typer.Option([], "--tag", help=tr("opt.tag_rep")),
@@ -29,6 +30,10 @@ def add_log(
     """Add a devlog entry to the active project (or --project)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
+    if content_file:
+        content = read_text_file(content_file)
+    if not content.strip():
+        raise typer.BadParameter("content is required (argument or --content-file)")
     entry = guard(core.add, conn, content, project_id=proj.id, task_id=task, tags=tag)
     data = {**entry.to_dict(), "project": proj.slug}
 
@@ -89,10 +94,15 @@ def search_cmd(
 def edit_log(
     ctx: typer.Context,
     entry_id: int = typer.Argument(..., help=tr("opt.id")),
-    content: str = typer.Argument(..., help=tr("opt.content")),
+    content: str = typer.Argument("", help=tr("opt.content")),
+    content_file: str | None = typer.Option(None, "--content-file", help=tr("opt.content_file")),
 ) -> None:
     """Replace the content of a devlog entry."""
     conn = get_conn(ctx)
+    if content_file:
+        content = read_text_file(content_file)
+    if not content.strip():
+        raise typer.BadParameter("content is required (argument or --content-file)")
     entry = guard(core.update, conn, entry_id, content=content)
     emit(ctx, entry.to_dict(), lambda: console.print(tr("log.updated", id=entry.id)))
 

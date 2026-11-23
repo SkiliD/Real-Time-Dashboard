@@ -4,7 +4,7 @@ import json
 import sqlite3
 
 from . import events, projects
-from .models import Task, escape_like, now_iso
+from .models import MAX_TITLE_LEN, Task, check_text, escape_like, now_iso
 
 VALID_PRIORITIES = ("critical", "high", "medium", "low")
 VALID_STATUSES = ("todo", "in_progress", "done", "cancelled")
@@ -31,7 +31,8 @@ def add(
 ) -> Task:
     if not isinstance(title, str) or not title.strip():
         raise ValueError("task title is required (non-empty)")
-    title = title.strip()
+    title = check_text(title.strip(), "title", MAX_TITLE_LEN)
+    description = check_text(description or "", "description")
     if priority not in VALID_PRIORITIES:
         raise ValueError(f"invalid priority {priority!r}, expected one of {VALID_PRIORITIES}")
     if status not in VALID_STATUSES:
@@ -250,6 +251,10 @@ def update(
         raise ValueError("title cannot be null")
     if priority is not _UNSET and priority is None:
         raise ValueError("priority cannot be null")
+    if title is not _UNSET and title is not None:
+        title = check_text(title.strip(), "title", MAX_TITLE_LEN)
+    if description is not _UNSET and description is not None:
+        description = check_text(description, "description")
     if parent_id is not _UNSET:
         _check_parent(conn, task, parent_id)
     fields, values = [], []

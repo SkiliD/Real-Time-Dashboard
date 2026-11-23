@@ -8,7 +8,7 @@ from rich.table import Table
 
 from devdash.core import features as core
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, guard, resolve_project
+from ..deps import get_conn, guard, resolve_project, read_text_file
 from ..output import emit
 
 app = typer.Typer(help=tr("group.feature.help"))
@@ -38,11 +38,12 @@ def add_feature(
     name: str = typer.Argument(..., help=tr("opt.name_feat")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
     description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
+    desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
 ) -> None:
     """Create a feature in a project (default: active)."""
     conn = get_conn(ctx)
     proj = resolve_project(conn, project)
-    f = guard(core.create, conn, proj.id, name, description)
+    f = guard(core.create, conn, proj.id, name, read_text_file(desc_file) if desc_file else description)
     data = {**f.to_dict(), "project": proj.slug, "progress": core.progress(conn, f.id)}
     emit(ctx, data, lambda: console.print(
         tr("feature.created", name=f.name, slug=proj.slug)
@@ -215,12 +216,13 @@ def edit_feature(
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
     name: str | None = typer.Option(None, "--name", "-n", help=tr("opt.name_feat")),
     description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
+    desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
 ) -> None:
     """Rename / edit a feature (name stays unique within the project)."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
-    f = guard(core.update, conn, ref, pid, name=name, description=description)
+    f = guard(core.update, conn, ref, pid, name=name, description=(read_text_file(desc_file) if desc_file else description))
     emit(ctx, f.to_dict(), lambda: console.print(tr("feature.updated", name=f.name)))
 
 

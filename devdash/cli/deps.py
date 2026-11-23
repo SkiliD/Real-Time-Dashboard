@@ -11,6 +11,22 @@ import typer
 
 from devdash.core import config, db
 from devdash.core.i18n import tr
+from devdash.core.models import MAX_TEXT_LEN
+
+
+def read_text_file(path: str) -> str:
+    """Read a whole text file (--desc-file / --content-file): the comfortable way
+    to write long descriptions for long-term projects, from your editor."""
+    from pathlib import Path
+
+    p = Path(path).expanduser()
+    try:
+        data = p.read_text(encoding="utf-8")
+    except OSError as e:
+        raise typer.BadParameter(f"cannot read {path}: {e.strerror or e}") from e
+    if len(data) > MAX_TEXT_LEN:
+        raise typer.BadParameter(f"{path} is too large (max {MAX_TEXT_LEN} chars)")
+    return data
 
 
 def get_conn(ctx: typer.Context) -> sqlite3.Connection:

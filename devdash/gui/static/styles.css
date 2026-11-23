@@ -110,6 +110,10 @@ body {
 .col-cancelled { opacity: .8; }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } /* keyboard focus on cards */
 
+/* long descriptions: multiline textareas that grow while typing */
+textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-height: 1.45; }
+#log-content.desc-input { min-height: 38px; }
+
 /* modal overlays: ALL modal containers share the fixed centered overlay
    (#modal-edit / #modal-task / #modal-help used to render in page flow) */
 #modal, #modal-edit, #modal-task, #modal-help, #modal-feat {
@@ -307,10 +311,35 @@ body {
 .btn-danger { background: #3a1d22; border: 1px solid var(--red); color: #ffb4b4; }
 .btn-danger-armed { background: var(--red); color: #fff; font-weight: 600; }
 
-/* kanban drag & drop */
-.card { cursor: grab; }
-.card.dragging { opacity: 0.4; }
-#kanban .col.drop-hover { outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: var(--radius); }
+/* kanban drag & drop: lifted ghost follows the cursor, columns glow on hover,
+   the dropped card "lands" with a small pop */
+.card { cursor: grab; transition: transform .16s ease, box-shadow .16s ease, opacity .16s ease, border-color .16s ease; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.35); border-color: var(--accent); }
+.card.dragging { opacity: .3; transform: scale(.97); }
+body.dnd-active { cursor: grabbing; }
+body.dnd-active .card { cursor: grabbing; }
+.drag-ghost {
+  position: absolute; top: -1000px; left: -1000px; z-index: 999; pointer-events: none;
+  transform: rotate(2deg); opacity: .92;
+  box-shadow: 0 14px 30px rgba(0,0,0,.5); border-color: var(--accent);
+}
+#kanban .col { transition: background-color .15s ease, box-shadow .15s ease, outline-color .15s ease; }
+#kanban .col.drop-hover {
+  outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius);
+  background: var(--panel-2); /* fallback */
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+@keyframes card-land {
+  0% { transform: scale(.9); box-shadow: 0 0 0 2px var(--accent); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+}
+.card.landed { animation: card-land .32s ease; }
+@keyframes col-flash {
+  0% { box-shadow: inset 0 0 0 2px var(--accent); }
+  100% { box-shadow: inset 0 0 0 0 transparent; }
+}
+#kanban .col.drop-flash { animation: col-flash .45s ease; }
 
 /* small inline tools (log edit/delete, feature detach) */
 .mini-btn {

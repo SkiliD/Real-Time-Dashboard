@@ -96,6 +96,72 @@ def test_appjs_named_timer_constants():
     assert "}, 5000);" not in APP_JS and "}, 6000);" not in APP_JS
 
 
+def test_appjs_dnd_is_fluid():
+    # custom drag ghost, move cursor, edge auto-scroll, drop feedback animations
+    assert "setDragImage" in APP_JS and "drag-ghost" in APP_JS
+    assert 'dropEffect = "move"' in APP_JS
+    assert "scrollBy" in APP_JS
+    assert "drop-flash" in APP_JS and "landed" in APP_JS
+
+
+def test_css_dnd_animations():
+    css = (ROOT / "devdash/gui/static/styles.css").read_text(encoding="utf-8")
+    for needle in ["@keyframes card-land", "@keyframes col-flash", ".drag-ghost",
+                   ".col.drop-hover", "color-mix", "prefers-reduced-motion"]:
+        assert needle in css, needle
+    assert ".card:hover" in css and "translateY(-2px)" in css
+
+
+# --- long descriptions (long-term projects) --------------------------------------
+
+def test_core_text_caps(conn):
+    from devdash.core.models import MAX_TEXT_LEN, MAX_TITLE_LEN
+    p = projects.create(conn, "demo")
+    long_ok = "x" * 50_000
+    t = tsk.add(conn, p.id, "task", description=long_ok)
+    assert len(t.description) == 50_000
+    with pytest.raises(ValueError):
+        tsk.add(conn, p.id, "task2", description="x" * (MAX_TEXT_LEN + 1))
+    with pytest.raises(ValueError):
+        tsk.add(conn, p.id, "t" * (MAX_TITLE_LEN + 1))
+    from devdash.core import logs
+    e = logs.add(conn, "y" * 50_000, project_id=p.id)
+    assert len(e.content) == 50_000
+    with pytest.raises(ValueError):
+        logs.add(conn, "y" * (MAX_TEXT_LEN + 1), project_id=p.id)
+
+
+def test_cli_desc_file(home, tmp_path):
+    import json
+    from typer.testing import CliRunner
+    from devdash.cli.main import app
+    runner = CliRunner()
+    note = tmp_path / "note.md"
+    note.write_text("# spec\n" + "lorem ipsum\n" * 500, encoding="utf-8")  # ~6k chars, multiline
+    r = runner.invoke(app, ["--json", "projects", "create", "LongProj", "--set-active"])
+    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, ["--json", "task", "add", "Big task", "--desc-file", str(note)])
+    assert r.exit_code == 0, r.output
+    data = json.loads(r.output)
+    assert data["description"].startswith("# spec\n")
+    assert len(data["description"]) > 5000
+    # edit path too
+    r = runner.invoke(app, ["--json", "task", "edit", str(data["id"]), "--desc-file", str(note)])
+    assert r.exit_code == 0, r.output
+    # log content from file
+    r = runner.invoke(app, ["--json", "log", "add", "--content-file", str(note)])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.output)["content"].startswith("# spec")
+
+
+def test_gui_descriptions_are_textareas():
+    for el in ("t-desc", "e-desc", "ft-desc", "log-content"):
+        assert f'<textarea id="{el}"' in INDEX_HTML, el
+        assert f'<input id="{el}"' not in INDEX_HTML, el
+    assert "desc-input" in APP_JS and "scrollHeight" in APP_JS  # auto-grow
+    assert "ctrlKey" in APP_JS and "addLog" in APP_JS  # Ctrl+Enter sends the devlog entry
+
+
 def test_folder_picker_linux_fallbacks(monkeypatch):
     """Linux CI runners have neither zenity nor kdialog: the command builder must
     degrade zenity -> kdialog -> None instead of crashing."""
