@@ -90,3 +90,69 @@ def test_gui_header_signature_quantizes_volatile_fields():
     line = next(l for l in js.splitlines() if 'renderPanel("header"' in l)
     assert "elapsed_min: 0" in line          # per-poll elapsed stays out of the signature
     assert "Math.round(state.status.today_minutes)" in line  # fractional minutes quantized
+
+
+def test_v11_sort_indexes_exist(home):
+    from devdash.core import config, db
+    conn = db.connect(config.db_path(home))
+    db.init_db(conn)
+    idx = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+    assert "idx_tasks_sort" in idx and "idx_commits_repo_date_hash" in idx
+    assert db.SCHEMA_VERSION == 11
+    conn.close()
+
+
+def test_status_uses_aggregates_not_full_rows(home):
+    from devdash.core import config, db, projects as proj, tasks as tsk, stats
+    conn = db.connect(config.db_path(home)); db.init_db(conn)
+    p = proj.create(conn, "Perf", engine="other")
+    proj.set_active(conn, p.id)
+    for i in range(5):
+        tsk.add(conn, p.id, f"t{i}", description="x" * 5000)
+    tsk.set_status(conn, tsk.list(conn, project_id=p.id)[0].id, "in_progress")
+    # count/brief helpers agree with the full list but load no descriptions
+    assert tsk.count_by_status(conn, p.id, ["todo", "in_progress"]) == 5
+    brief = tsk.list_brief(conn, p.id, "in_progress")
+    assert len(brief) == 1 and set(brief[0]) == {"id", "title"}
+    full = stats.project_progress(conn, project_id=p.id)
+    agg = stats.project_progress_sql(conn, p.id)
+    assert agg == full  # same shape/values, computed in SQL
+    conn.close()
+
+
+def test_events_payload_capped_and_periodic_prune(home):
+    from devdash.core import config, db, events as ev
+    conn = db.connect(config.db_path(home)); db.init_db(conn)
+    big = {"blob": "z" * 9000}
+    e = ev.append(conn, "task", 1, "created", big)
+    row = conn.execute("SELECT payload FROM events WHERE id = ?", (e.id,)).fetchone()
+    assert len(row["payload"]) <= ev.PAYLOAD_MAX + 2
+    for i in range(30):
+        ev.append(conn, "task", i, "created", None, commit=False)
+    conn.commit()
+    assert ev.prune_if_needed(conn, keep=10, every=5) > 0   # 31 events > 10+5 -> prune
+    assert conn.execute("SELECT COUNT(*) c FROM events").fetchone()["c"] == 10
+    assert ev.prune_if_needed(conn, keep=10, every=5) == 0   # below threshold: no-op
+    conn.close()
+
+
+def test_config_load_cache_by_mtime(tmp_path, monkeypatch):
+    import json
+    from devdash.core import config
+    monkeypatch.setenv("DEVDASH_HOME", str(tmp_path))
+    config._load_cache["key"] = None
+    (tmp_path / "config.json").write_text(json.dumps({"lang": "en"}), encoding="utf-8")
+    c1 = config.load_config(tmp_path)
+    assert c1.lang == "en"
+    # same size + forced same mtime -> cache hit, no re-read
+    import os
+    mt = (tmp_path / "config.json").stat().st_mtime_ns
+    (tmp_path / "config.json").write_text(json.dumps({"lang": "fr"}), encoding="utf-8")
+    os.utime(tmp_path / "config.json", ns=(mt, mt))
+    c2 = config.load_config(tmp_path)
+    assert c2 is c1  # cache hit (same object, still lang=en)
+    # save_config invalidates/updates the cache
+    c1.lang = "fr"
+    config.save_config(c1, tmp_path)
+    c3 = config.load_config(tmp_path)
+    assert c3.lang == "fr"  # save_config refreshed the cache with the saved object

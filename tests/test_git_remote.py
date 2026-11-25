@@ -266,3 +266,29 @@ def test_run_git_disables_textconv_extdiff_env_and_stdin(tmp_path, monkeypatch):
     assert r["ok"] is True
     cmd = captured["cmd"]
     assert cmd.index("--no-textconv") < cmd.index("--") < cmd.index("f.txt")
+
+
+def test_remote_read_kills_ext_and_fd_transports(git_repo):
+    from devdash.core import gitwatch
+    # the protocol guards must be injected as GLOBAL -c options (before the subcommand)
+    r = gitwatch.run_remote_read(str(git_repo), "fetch")
+    assert r["returncode"] is not None  # the command actually ran (real repo)
+    src = open(gitwatch.__file__, encoding="utf-8").read()
+    assert '["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never", sub' in src
+    # GIT_ALLOW_PROTOCOL must NOT be set: it makes even local "file" remotes fail
+    assert '"GIT_ALLOW_PROTOCOL"' not in src
+    # fsck --lost-found is a WRITE: must be refused by the read-only runner
+    r2 = gitwatch.run_readonly(str(git_repo), "fsck --lost-found")
+    assert r2["ok"] is False and "lost-found" in r2["stderr"]
+
+
+def test_git_env_extra_merge():
+    from devdash.core import gitwatch
+    import os
+    os.environ["GIT_EVIL"] = "1"
+    try:
+        env = gitwatch._git_env({"GIT_ALLOW_PROTOCOL": "https"})
+        assert "GIT_EVIL" not in env
+        assert env["GIT_ALLOW_PROTOCOL"] == "https"
+    finally:
+        del os.environ["GIT_EVIL"]

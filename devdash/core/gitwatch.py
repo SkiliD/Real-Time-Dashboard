@@ -34,15 +34,18 @@ class GitError(Exception):
     """Raised when a git operation fails (not a repo, git missing, ...)."""
 
 
-def _git_env() -> dict:
+def _git_env(extra: dict | None = None) -> dict:
     """Environment for git subprocesses: NEVER inherit GIT_* variables
     (GIT_EXTERNAL_DIFF / GIT_CONFIG_PARAMETERS / GIT_SSH_COMMAND could spawn
-    processes or inject config) — set only the ones we need."""
+    processes or inject config) — set only the ones we need. `extra` is merged
+    last (used to cap allowed URL protocols on remote operations)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     # NOTE: no GIT_CONFIG_NOSYSTEM here — the machine's own system/global config is
     # trusted (it is what makes core.autocrlf work on Windows); only the *repo*
     # config is untrusted, and --no-textconv/--no-ext-diff neutralize its drivers.
     env.update({"GIT_PAGER": "cat", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
+    if extra:
+        env.update(extra)
     return env
 
 
@@ -88,6 +91,7 @@ FORBIDDEN_GIT_LONG_PREFIXES = (
     # process-spawning / clone / diff-filter vectors (hostile repo or URL remote):
     "--ext-diff", "--textconv", "--upload-pack", "--recurse-submodules",
     "--depth", "--shallow-since", "--shallow-exclude", "--negotiation-tip", "--filter",
+    "--lost-found",  # fsck --lost-found WRITES dangling objects into .git/lost-found
 )
 #: letters that must never appear in a short-option cluster (attached forms like -dfoo)
 FORBIDDEN_GIT_SHORT_LETTERS = frozenset("dDmMfcoC")
@@ -122,7 +126,8 @@ def _refused_git_arg(a: str) -> str | None:
     return None
 
 
-def _run_git(repo_path, argv: list[str], timeout: int, display: str | None = None) -> dict:
+def _run_git(repo_path, argv: list[str], timeout: int, display: str | None = None,
+             extra_env: dict | None = None) -> dict:
     """Run git with an argv list (NEVER a shell string) confined to repo_path via
     our own -C. Returns {"ok", "returncode", "stdout", "stderr", "cmd"} — runtime
     failures are values in the dict, never exceptions."""
@@ -141,7 +146,7 @@ def _run_git(repo_path, argv: list[str], timeout: int, display: str | None = Non
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",  # git emits UTF-8; locale (cp1252) would mojibake it
             stdin=subprocess.DEVNULL,  # shortlog / cat-file --batch would block on stdin
-            env=_git_env(),
+            env=_git_env(extra_env),
         )
     except FileNotFoundError:
         out["stderr"] = "git executable not found on PATH"
@@ -264,6 +269,12 @@ def run_remote_read(repo_path, cmdline: str, timeout: int = REMOTE_TIMEOUT) -> d
     if sub == "remote" and any(a not in ("-v", "--verbose") for a in argv[1:]):
         out["stderr"] = "git remote: only '-v' is allowed"
         return out
+    # A hostile LINKED repo can point remote.origin.url at ext::sh -c '…' (git-remote-ext
+    # executes it on fetch/pull) or use fd:: transports. Kill both. The -c flags are
+    # GLOBAL git options: they must precede the subcommand (git -c x=y <sub>).
+    # NOTE: no GIT_ALLOW_PROTOCOL env — setting it makes even the local "file"
+    # transport fail ("transport 'file' not allowed"), breaking local-path remotes.
+    argv = ["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never", sub, *argv[1:]]
     return _run_git(repo_path, argv, timeout, cmdline)
 
 

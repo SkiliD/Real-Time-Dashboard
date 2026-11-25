@@ -194,3 +194,17 @@ def test_config_roundtrip_gui_window(tmp_path):
 
 def test_ui_radius_softened():
     assert "--radius: 10px;" in CSS  # cards/panels slightly rounder (window corners via DWM attr 33)
+
+
+def test_window_geom_clamped_to_real_screen():
+    from devdash.gui import desktop
+    g = {"w": 1360, "h": 860, "x": 3000, "y": 5000, "maximized": False}
+    work = (0, 0, 1920, 1040)  # typical 1080p work area
+    out = desktop._clamp_to_workarea(g, work)
+    assert out["x"] == 1920 - 64          # at least 64 px visible on the right edge
+    assert out["y"] == 1040 - 64
+    g2 = {"w": 1360, "h": 860, "x": -5000, "y": -100, "maximized": False}
+    out2 = desktop._clamp_to_workarea(g2, work)
+    assert out2["x"] == 0 - 1360 + 64     # at least 64 px visible on the left edge
+    assert out2["y"] == 0
+    assert "_clamp_to_workarea(geom, wa)" in DESKTOP and "_primary_workarea()" in DESKTOP

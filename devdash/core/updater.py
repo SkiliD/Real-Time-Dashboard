@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,12 +30,22 @@ def install_mode() -> str:
     return "git" if package_repo() is not None else "pip"
 
 
+def _git_env() -> dict:
+    """Same rule as gitwatch: never inherit GIT_* env vars (GIT_DIR / GIT_CONFIG_
+    PARAMETERS / GIT_SSH_COMMAND in the environment would redirect these fetch/
+    pull calls on the app repo)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update({"GIT_PAGER": "cat", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
+    return env
+
+
 def _git(repo: Path, *args: str, timeout: int = _GIT_TIMEOUT) -> tuple[int, str]:
     try:
         r = subprocess.run(
             ["git", "-C", str(repo), *args],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, env=_git_env(),
         )
         return r.returncode, (r.stdout + r.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:

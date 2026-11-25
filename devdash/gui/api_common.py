@@ -10,6 +10,21 @@ class ApiError(Exception):
         self.status = status
 
 
+# List endpoints are polled every 1.5 s by the GUI: long text fields are truncated
+# in list payloads (full text stays available via the /show endpoints).
+LIST_DESC_MAX = 300   # task description chars kept in /api/tasks list rows
+LIST_CONTENT_MAX = 500  # log content chars kept in /api/logs list rows
+
+
+def truncate_field(d: dict, field: str, max_len: int) -> dict:
+    """Truncate a long text field in a list payload, in place, and flag it."""
+    v = d.get(field)
+    if isinstance(v, str) and len(v) > max_len:
+        d[field] = v[:max_len] + "…"
+        d[field + "_truncated"] = True
+    return d
+
+
 def _folder_picker_command(title: str, platform: str | None = None) -> list[str] | None:
     """OS-native folder-picker command (stdlib subprocess only — the HTTP server
     thread must not touch tkinter). Prints the chosen path on stdout, nothing

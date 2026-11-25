@@ -147,3 +147,43 @@ def test_mcp_all_tools_respond(home: Path):
         except clean_errors:
             pass  # legitimate structured error (no repo linked, AI off, ...): fine
         # anything else would be an unhandled crash -> test fails
+
+
+def test_list_payloads_truncate_long_text_but_show_returns_full(api: Api):
+    # /api/tasks and /api/logs are polled every 1.5 s: long fields must be truncated
+    # in list payloads; the full text is served by the /show endpoints
+    from devdash.gui.api_common import LIST_DESC_MAX, LIST_CONTENT_MAX
+    long_desc = "x" * (LIST_DESC_MAX + 500)
+    long_content = "y" * (LIST_CONTENT_MAX + 700)
+    t = api.tasks_add({"title": "Big", "description": long_desc})
+    e = api.logs_add({"content": long_content})
+    lst = api.tasks({"all": "1"})
+    row = next(r for r in lst["tasks"] if r["id"] == t["id"])
+    assert row["description_truncated"] is True and len(row["description"]) <= LIST_DESC_MAX + 1
+    assert api.tasks_show({"id": t["id"]})["task"]["description"] == long_desc
+    ll = api.logs_list({"limit": "50"})
+    erow = next(r for r in ll["entries"] if r["id"] == e["id"])
+    assert erow["content_truncated"] is True and len(erow["content"]) <= LIST_CONTENT_MAX + 1
+    assert api.logs_show({"id": e["id"]})["entry"]["content"] == long_content
+    # short text is untouched, no flag
+    t2 = api.tasks_add({"title": "Small", "description": "court"})
+    row2 = next(r for r in api.tasks({"all": "1"})["tasks"] if r["id"] == t2["id"])
+    assert row2["description"] == "court" and "description_truncated" not in row2
+    # show endpoints validate input
+    with pytest.raises(ApiError) as e1:
+        api.tasks_show({})
+    assert e1.value.status == 400
+    with pytest.raises(ApiError) as e2:
+        api.logs_show({"id": 999999})
+    assert e2.value.status == 404
+
+
+def test_show_routes_registered():
+    from devdash.gui.server import GET_ROUTES
+    assert "/api/tasks/show" in GET_ROUTES and "/api/logs/show" in GET_ROUTES
+
+
+def test_gui_fetches_full_text_before_editing():
+    js = (Path(__file__).resolve().parent.parent / "devdash/gui/static/app.js").read_text(encoding="utf-8")
+    assert 'api.get("/api/tasks/show?id=" + t.id)' in js   # task modal: full description
+    assert 'api.get("/api/logs/show?id=" + e.id)' in js     # log inline edit: full content

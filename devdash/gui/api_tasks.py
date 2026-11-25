@@ -1,7 +1,7 @@
 # tasks endpoints of the GUI REST layer (mixin of Api).
 from __future__ import annotations
 
-from .api_common import ApiError
+from .api_common import ApiError, LIST_DESC_MAX, truncate_field
 from devdash.core import tasks as tsk
 
 class TasksMixin:
@@ -22,7 +22,23 @@ class TasksMixin:
                 limit=limit,
                 trash=query.get("deleted") in ("1", "true", "yes"),  # corbeille view
             )
-            return {"count": len(result), "tasks": [t.to_dict() for t in result]}
+            # list rows carry a truncated description (polled every 1.5 s);
+            # the full text is served by /api/tasks/show
+            return {"count": len(result),
+                    "tasks": [truncate_field(t.to_dict(), "description", LIST_DESC_MAX) for t in result]}
+
+
+    def tasks_show(self, query: dict) -> dict:
+        """Full task row (id required). Used by the edit modal so a truncated
+        list description can never be saved back over the full text."""
+        tid = self._int(query.get("id"), "id")
+        if tid is None:
+            raise ApiError("id is required")
+        with self._conn() as c:
+            t = tsk.get(c, tid)
+            if t is None or t.deleted_at is not None:
+                raise ApiError("task not found", status=404)
+            return {"task": t.to_dict()}
 
 
     def tasks_tree(self, query: dict) -> dict:

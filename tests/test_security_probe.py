@@ -259,3 +259,35 @@ def test_mcp_survives_garbage_lines(home):
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+def test_updater_git_env_is_scrubbed():
+    import os
+    from devdash.core import updater
+    os.environ["GIT_CONFIG_PARAMETERS"] = "evil"
+    try:
+        env = updater._git_env()
+        assert "GIT_CONFIG_PARAMETERS" not in env
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
+    finally:
+        del os.environ["GIT_CONFIG_PARAMETERS"]
+
+
+def test_mcp_tool_error_is_generic_for_unexpected_exceptions(monkeypatch):
+    from devdash import mcp_server
+    def boom(name, args, home):
+        raise RuntimeError("secret path C:/Users/x/../../etc and SQL: SELECT * FROM t")
+    monkeypatch.setattr(mcp_server, "_call", boom)
+    resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                      "params": {"name": "devdash_tasks", "arguments": {}}}, None)
+    txt = resp["result"]["content"][0]["text"]
+    assert resp["result"]["isError"] is True
+    assert "internal error" in txt and "C:/Users" not in txt and "SELECT" not in txt
+
+
+def test_redos_alternation_in_quantified_group_rejected():
+    from devdash.core.config import _has_nested_quantifier
+    assert _has_nested_quantifier("(a|a)+") is True
+    assert _has_nested_quantifier("(a|a?)+") is True
+    assert _has_nested_quantifier("(ab)+") is False
+    assert _has_nested_quantifier("#(\d+)") is False

@@ -8,7 +8,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -178,6 +178,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tasks_completed "
             "ON tasks(completed_at) WHERE status = 'done' AND completed_at IS NOT NULL"
+        )
+    if version < 11:
+        # v11: poll-path sort indexes — tasks ORDER BY CASE status/priority (expression
+        # index must match the ORDER BY exactly), commits with the hash tiebreak
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_sort ON tasks("
+            "project_id, "
+            "CASE status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'done' THEN 2 ELSE 3 END, "
+            "CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, "
+            "order_index, id) WHERE deleted_at IS NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_commits_repo_date_hash "
+            "ON git_commits(repo_path, committed_at DESC, hash DESC)"
         )
     # no commit here: init_db wraps _migrate in a single transaction
 

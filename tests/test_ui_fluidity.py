@@ -126,3 +126,25 @@ def test_trash_is_a_real_toggle_button_not_a_checkbox():
     assert 'tb.classList.toggle("btn-active"' in APP_JS  # active state synced in renderKanban
     assert "#task-toolbar .tool-toggle" in STYLES  # shares the select styling rule
     assert "#task-toolbar .tool-toggle.btn-active" in STYLES  # visible "on" state
+
+
+def test_kanban_project_switch_uses_slug():
+    assert "renderKanban._pid !== state.active)" in APP_JS  # state.active is a slug, not an object
+
+
+def test_render_signatures_cover_tasks_and_git_error():
+    assert "state.gitError, state.tasks], renderGit);" in APP_JS
+    assert 'renderPanel("features", [state.features, state.tasks], renderFeatures);' in APP_JS
+
+
+def test_tab_shortcut_covers_8_tabs_and_estimate_zero_chip():
+    assert 'case "8":' in APP_JS  # AI tab makes 8 visible tabs
+    assert "t.estimate_min != null ?" in APP_JS  # 0 min estimate still shows its chip
+
+
+def test_detect_folder_stale_response_guard():
+    assert "const seq = ++detectSeq;" in APP_JS and "if (seq !== detectSeq) return;" in APP_JS
+
+
+def test_tour_flag_server_is_authoritative():
+    assert 'api.get("/api/tour").then((r) => { state.tourDone = !!r.done; })' in APP_JS

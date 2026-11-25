@@ -5,6 +5,8 @@ import sqlite3
 
 from .models import Event, now_iso
 
+PAYLOAD_MAX = 2000  # stored payload chars cap per event (API responses truncate too)
+
 def append(
     conn: sqlite3.Connection,
     entity: str,
@@ -16,6 +18,11 @@ def append(
     """Append an event. commit=False lets callers batch many events in one
     transaction (the caller commits)."""
     ts = now_iso()
+    # cap the stored payload: the bus is polled by the GUI and old events are
+    # useless past the prune window — a 100k-char payload per event would bloat it
+    payload_json = json.dumps(payload or {}, ensure_ascii=False)
+    if len(payload_json) > PAYLOAD_MAX:
+        payload_json = payload_json[:PAYLOAD_MAX] + "…}"
     cur = conn.execute(
         "INSERT INTO events(entity, entity_id, action, payload, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -23,7 +30,7 @@ def append(
             entity,
             str(entity_id) if entity_id is not None else None,
             action,
-            json.dumps(payload or {}, ensure_ascii=False),
+            payload_json,
             ts,
         ),
     )
@@ -68,3 +75,14 @@ def prune(conn: sqlite3.Connection, keep: int = DEFAULT_PRUNE_KEEP) -> int:
     )
     conn.commit()
     return cur.rowcount
+
+
+def prune_if_needed(conn: sqlite3.Connection, keep: int = DEFAULT_PRUNE_KEEP,
+                    every: int = 500) -> int:
+    """Cheap periodic prune for long-lived processes: at most one COUNT per
+    `every` appends, one DELETE when the bus exceeds `keep`. Returns deleted
+    rows (0 most of the time). Call from append() or a watcher loop."""
+    row = conn.execute("SELECT COALESCE(MAX(id), 0) AS m, COUNT(*) AS c FROM events").fetchone()
+    if row["c"] < keep + every:
+        return 0
+    return prune(conn, keep)

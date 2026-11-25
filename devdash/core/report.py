@@ -110,11 +110,16 @@ def _section_estimates(est: dict) -> list[str]:
     lines = ["", f"## {tr('report.estimates')}", ""]
     if agg["with_estimate"]:
         pct = agg["pct_of_estimate"]
-        lines.append(
-            f"- {tr('report.est_line', n=agg['with_estimate'], est=fmt_min(agg['est_total_min']),
-                   act=fmt_min(agg['actual_on_estimated_min']),
-                   pct=(f'{pct}%' if pct is not None else '—'))}"
+        # hoisted out of the f-string: multi-line / nested-quote f-strings are 3.12+ only
+        pct_txt = f"{pct}%" if pct is not None else "—"
+        est_line = tr(
+            "report.est_line",
+            n=agg["with_estimate"],
+            est=fmt_min(agg["est_total_min"]),
+            act=fmt_min(agg["actual_on_estimated_min"]),
+            pct=pct_txt,
         )
+        lines.append(f"- {est_line}")
         lines.append(f"- {tr('report.est_over', over=agg['over'], under=agg['under'])}")
         top = [r for r in est["tasks"] if r["ratio"] is not None][:TOP_ESTIMATES]
         for r in top:

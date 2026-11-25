@@ -130,3 +130,51 @@ def test_version_is_a_coherent_beta_prerelease():
     assert "StringStruct('FileVersion', '0.9.0.1')" in vi
     assert "StringStruct('ProductVersion', '0.9.0-beta.1')" in vi
     assert 'assemblyIdentity version="0.9.0.1"' in (ROOT / "scripts" / "app.manifest").read_text(encoding="utf-8")
+
+
+def test_no_py312_only_fstrings_anywhere():
+    # CI runs on Python 3.11/3.13: a single-quoted f-string spanning several lines
+    # (PEP 701, 3.12+) is a SyntaxError there. Tokenize devdash/+tests/+scripts and
+    # fail if any non-triple f-string opens and closes on different lines.
+    import io
+    import tokenize
+    bad = []
+    for d in ("devdash", "tests", "scripts"):
+        for p in (ROOT / d).rglob("*.py"):
+            if "__pycache__" in p.parts:
+                continue
+            toks = list(tokenize.generate_tokens(io.StringIO(p.read_text(encoding="utf-8")).readline))
+            stack = []
+            for t in toks:
+                name = tokenize.tok_name[t.type]
+                if name == "FSTRING_START":
+                    stack.append((t.string, t.start[0]))
+                elif name == "FSTRING_END" and stack:
+                    q, line = stack.pop()
+                    if q not in ('f"""', "f'''") and t.end[0] != line:
+                        bad.append(f"{p}:{line}")
+    assert not bad, f"3.12+-only multi-line f-strings (SyntaxError on py3.11 CI): {bad}"
+
+
+def test_no_command_install_and_defender_exclusion_assets():
+    # double-click install path (no exe involved -> nothing for Device Guard/Defender to block)
+    launcher = ROOT / "DevDash.bat"
+    assert launcher.is_file()
+    bat = launcher.read_text(encoding="utf-8")
+    assert ".venv\Scripts\python.exe" in bat and "py -3" in bat  # venv preferred, system python fallback
+    installer = ROOT / "Install-DevDash.bat"
+    assert installer.is_file() and "DevDash.lnk" in installer.read_text(encoding="utf-8")
+    # Defender exclusion helper: adds the app folder + dist to the exclusion list
+    excl = ROOT / "scripts" / "Add-Defender-Exclusion.bat"
+    assert excl.is_file()
+    txt = excl.read_text(encoding="utf-8")
+    assert "Add-MpPreference -ExclusionPath" in txt and "dist" in txt
+    # documented in both READMEs
+    for readme in ("README.md", "README.fr.md"):
+        t = (ROOT / readme).read_text(encoding="utf-8")
+        assert "DevDash.bat" in t and "Add-Defender-Exclusion.bat" in t, readme
+
+
+def test_version_info_numeric_fields_match_beta():
+    v = (ROOT / "scripts" / "version_info.txt").read_text(encoding="utf-8")
+    assert "filevers=(0, 9, 0, 1)" in v and "prodvers=(0, 9, 0, 1)" in v  # 0.9.0b1 -> 0.9.0.1

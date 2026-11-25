@@ -172,6 +172,42 @@ def _clamp_window_geom(g) -> dict | None:
             "maximized": bool(g.get("maximized"))}
 
 
+def _clamp_to_workarea(geom: dict, work: tuple[int, int, int, int]) -> dict:
+    """Clamp a window geometry so at least 64 px of the window stays visible
+    inside the work area (left, top, right, bottom) — a persisted position on a
+    removed/rotated monitor must never restore the window fully off-screen.
+    Pure function -> unit-testable."""
+    left, top, right, bottom = work
+    w = geom["w"]
+    return {**geom,
+            "x": min(max(geom["x"], left - w + 64), right - 64),
+            "y": min(max(geom["y"], top), bottom - 64)}
+
+
+def _primary_workarea() -> tuple[int, int, int, int] | None:
+    """Primary monitor work area (excludes the taskbar) via Win32; None elsewhere."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                        ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        hmon = user32.MonitorFromPoint(wintypes.POINT(0, 0), 2)  # MONITOR_DEFAULTTOPRIMARY
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            r = mi.rcWork
+            return (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        pass
+    return None
+
+
 def _save_window_geom(win, home: Path | None) -> None:
     """Persist window position + size (+ maximized flag) when the window closes,
     so the next launch reopens the app exactly where it was left. Best-effort:
@@ -478,6 +514,10 @@ def run(port: int | None = None, browser: bool = False, home: Path | None = None
 
     url = f"http://127.0.0.1:{actual_port}/"
     geom = _clamp_window_geom(cfg.gui_window or {})  # geometry saved at last close
+    if geom:
+        wa = _primary_workarea()
+        if wa:
+            geom = _clamp_to_workarea(geom, wa)  # never restore the window fully off-screen
 
 
 

@@ -57,6 +57,13 @@ Sans environnement virtuel : `pipx install .`
 > par une stratégie de contrôle d'application, passe par l'interpréteur :
 > `.venv\Scripts\python.exe -m devdash gui` (un shim `devdash.bat` fonctionne aussi).
 
+> **Windows — Defender/SmartScreen** : un `.exe` PyInstaller non signé peut être signalé
+> comme suspect. Sans aucune commande : double-clic sur `DevDash.bat` pour lancer sans
+> aucun exe, ou `Install-DevDash.bat` une fois pour créer un raccourci Bureau. Pour un
+> `.exe` « propre » : signez-le avec un certificat de confiance (`scripts/sign_exe.ps1`),
+> ou double-clic sur `scripts/Add-Defender-Exclusion.bat` une fois (clic droit →
+> Exécuter en tant qu'administrateur) pour exclure le dossier de l'analyse Defender.
+
 ### Sans Python ? Fabrique un exécutable
 
 ```bash

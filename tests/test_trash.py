@@ -45,7 +45,7 @@ def test_schema_v9_adds_deleted_at():
     c = db.connect(":memory:")
     c.row_factory = sqlite3.Row
     db.init_db(c)
-    assert db.schema_version(c) == db.SCHEMA_VERSION == 10
+    assert db.schema_version(c) == db.SCHEMA_VERSION == 11
     for t in ("tasks", "log_entries", "features"):
         cols = {r["name"] for r in c.execute(f"PRAGMA table_info({t})")}
         assert "deleted_at" in cols, t

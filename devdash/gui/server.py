@@ -41,6 +41,7 @@ GET_ROUTES = {
     "/api/projects": lambda api, q: api.projects(),
     "/api/detect": lambda api, q: api.detect_path(q),
     "/api/tasks": lambda api, q: api.tasks(q),
+    "/api/tasks/show": lambda api, q: api.tasks_show(q),
     "/api/tasks/tree": lambda api, q: api.tasks_tree(q),
     "/api/tags": lambda api, q: api.tags(q),
     "/api/status": lambda api, q: api.status(),
@@ -49,6 +50,7 @@ GET_ROUTES = {
     "/api/sessions": lambda api, q: api.sessions_list(q),
     "/api/sessions/minutes": lambda api, q: api.sessions_minutes(q),
     "/api/logs": lambda api, q: api.logs_list(q),
+    "/api/logs/show": lambda api, q: api.logs_show(q),
     "/api/git/status": lambda api, q: api.git_status(q),
     "/api/git/commits": lambda api, q: api.git_commits(q),
     "/api/git/repos": lambda api, q: api.git_repos(),
@@ -299,6 +301,10 @@ def start_git_watcher(api: Api, interval_sec: int = 20) -> None:
         while True:
             try:
                 api.git_sync({})
+                # periodic event-bus prune: long-lived GUI sessions must not grow it forever
+                from devdash.core import events as ev
+                with api._conn() as conn:
+                    ev.prune_if_needed(conn)
             except Exception:
                 pass  # watcher must never crash the GUI
             time.sleep(max(5, interval_sec))

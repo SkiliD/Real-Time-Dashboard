@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import threading
@@ -148,17 +149,22 @@ def test_start_build_without_pyinstaller(monkeypatch: pytest.MonkeyPatch):
     assert r["started"] is False and "PyInstaller" in r["error"]
 
 
+def _strip_ansi(s: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", s)  # CI runners may force rich colors into captured output
+
+
 def test_cli_build_help():
     r = runner.invoke(app, ["build", "--help"])
     assert r.exit_code == 0
-    assert "--onefile" in r.output and "--no-gui" in r.output and "--no-console" in r.output
+    out = _strip_ansi(r.output)
+    assert "--onefile" in out and "--no-gui" in out and "--no-console" in out
 
 
 def test_cli_build_reports_missing_pyinstaller(monkeypatch: pytest.MonkeyPatch, home: Path):
     monkeypatch.setattr(build_core, "pyinstaller_available", lambda: False)
     r = runner.invoke(app, ["build"])
     assert r.exit_code == 0
-    assert "PyInstaller" in r.output
+    assert "PyInstaller" in _strip_ansi(r.output)
 
 
 def test_api_routes_registered():

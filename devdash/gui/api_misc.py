@@ -39,14 +39,16 @@ class MiscMixin:
             active = proj.get_active(c)
             if active is None:
                 return {"active": None, "session": None, "last_event_id": ev.last_id(c)}
-            open_tasks = tsk.list(c, project_id=active.id, status=["todo", "in_progress"])
-            in_progress = [t.to_dict() for t in open_tasks if t.status == "in_progress"]
+            # COUNT/aggregate SQL only: this endpoint is polled every 1.5 s and
+            # must not load full task rows (descriptions can be 100k chars)
+            open_count = tsk.count_by_status(c, active.id, ["todo", "in_progress"])
+            in_progress = tsk.list_brief(c, active.id, "in_progress")
             s = sess.current(c)
             if s is not None and s.project_id != active.id:
                 s = None
             return {
                 "active": active.to_dict(),
-                "open_tasks": len(open_tasks),
+                "open_tasks": open_count,
                 "in_progress": in_progress,
                 "done_today": stats.tasks_done_today(c, active.id),
                 "session": None if s is None else {
@@ -54,7 +56,7 @@ class MiscMixin:
                 },
                 "today_minutes": stats.today_minutes(c, active.id),
                 "streak_days": stats.streak_days(c, active.id),
-                "progress": stats.project_progress(c, active.id),
+                "progress": stats.project_progress_sql(c, active.id),
                 "git": gitwatch.status(c, active.id),
                 "last_event_id": ev.last_id(c),
             }

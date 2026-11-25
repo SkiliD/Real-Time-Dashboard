@@ -109,19 +109,34 @@ _KEY_TYPES: dict[str, tuple[type, ...]] = {
 }
 
 
+# mtime/size cache so the polled endpoints (e.g. /api/ai/status every 1.5 s) do not
+# re-read + re-parse config.json from disk on every call; invalidated by save_config
+_load_cache: dict = {"key": None, "mtime": None, "size": None, "cfg": None}
+
+
 def load_config(home: Path | None = None) -> Config:
     """Load config.json. Missing file, malformed JSON or wrong-typed values all
     fall back to defaults for the affected keys -- the app must never crash
-    because of a hand-edited config file."""
+    because of a hand-edited config file. Results are cached by (path, mtime,
+    size): the GUI polls endpoints that call this every 1.5 s."""
     path = config_path(home)
     cfg = Config()
+    try:
+        st = path.stat()
+        ckey = (str(path), st.st_mtime_ns, st.st_size)
+        if _load_cache["key"] == ckey and _load_cache["cfg"] is not None:
+            return _load_cache["cfg"]
+    except OSError:
+        return cfg  # missing file
     if not path.exists():
         return cfg
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        _load_cache.update(key=ckey, mtime=st.st_mtime_ns, size=st.st_size, cfg=cfg)
         return cfg  # malformed file: keep defaults rather than crash
     if not isinstance(data, dict):
+        _load_cache.update(key=ckey, mtime=st.st_mtime_ns, size=st.st_size, cfg=cfg)
         return cfg
     for key, value in data.items():
         expected = _KEY_TYPES.get(key)
@@ -135,6 +150,7 @@ def load_config(home: Path | None = None) -> Config:
         if key == "commit_patterns" and not all(isinstance(p, str) for p in value):
             continue
         setattr(cfg, key, value)
+    _load_cache.update(key=ckey, mtime=st.st_mtime_ns, size=st.st_size, cfg=cfg)
     return cfg
 
 
@@ -169,6 +185,12 @@ def save_config(cfg: Config, home: Path | None = None) -> Path:
             raise
         from .db import restrict_permissions
         restrict_permissions(path)  # chmod 600 + icacls ACL reset on Windows
+        # invalidate the load cache so the next load_config sees the new file
+        try:
+            st = path.stat()
+            _load_cache.update(key=(str(path), st.st_mtime_ns, st.st_size), cfg=cfg)
+        except OSError:
+            _load_cache["key"] = None
     return path
 
 
@@ -204,11 +226,13 @@ _MAX_PATTERN_LEN = 200
 # shape. Rejecting them at validation time keeps `gitwatch.parse_message` safe
 # without needing a regex timeout (not available on Windows).
 _NESTED_QUANT_RE = re.compile(r"\([^()]*[+*{][^()]*\)[+*{]")
+# alternation inside a quantified group, e.g. (a|a)+ or (a|a?)+ — also exponential
+_ALT_QUANT_RE = re.compile(r"\([^()]*\|[^()]*\)[+*{]")
 
 
 def _has_nested_quantifier(pattern: str) -> bool:
     """Heuristic: True if the pattern looks like it can backtrack exponentially."""
-    return bool(_NESTED_QUANT_RE.search(pattern))
+    return bool(_NESTED_QUANT_RE.search(pattern) or _ALT_QUANT_RE.search(pattern))
 
 
 def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) -> Config:

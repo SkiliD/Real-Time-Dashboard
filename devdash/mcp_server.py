@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("devdash.mcp")
 
 from . import __version__
 from .core import config as cfgmod
@@ -406,16 +409,23 @@ def handle_request(req, home: Path | None) -> dict | None:
                 data = _call(name, args, home)
                 result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, default=str)}],
                           "isError": False}
-            except Exception as e:
-                result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}],
+            except (KeyError, ValueError) as e:
+                # domain errors: the message is safe to show (validated input)
+                result = {"content": [{"type": "text", "text": str(e) or type(e).__name__}],
+                          "isError": True}
+            except Exception:
+                # unexpected: never leak paths/SQL fragments to the MCP client; log server-side
+                logger.exception("tools/call %s failed", name)
+                result = {"content": [{"type": "text", "text": "internal error (details in server log)"}],
                           "isError": True}
         else:
             return {"jsonrpc": "2.0", "id": rid,
                     "error": {"code": -32601, "message": f"method not found: {method}"}}
         return {"jsonrpc": "2.0", "id": rid, "result": result}
-    except Exception as e:  # protocol-level failure
+    except Exception:  # protocol-level failure: generic message, details in the log
+        logger.exception("handle_request failed")
         return {"jsonrpc": "2.0", "id": rid,
-                "error": {"code": -32603, "message": f"internal error: {e}"}}
+                "error": {"code": -32603, "message": "internal error (details in server log)"}}
 
 
 def serve(home: Path | None = None) -> None:

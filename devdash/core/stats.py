@@ -130,6 +130,28 @@ def project_progress(conn: sqlite3.Connection, project_id: int, all_tasks: list 
     }
 
 
+def project_progress_sql(conn: sqlite3.Connection, project_id: int) -> dict:
+    """Same shape as project_progress() but computed in SQL (COUNT/SUM) —
+    /api/status is polled every 1.5 s and must not load every task row."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, SUM(status = 'done') AS done, "
+        "SUM(COALESCE(estimate_min, ?)) AS w_total, "
+        "SUM(CASE WHEN status = 'done' THEN COALESCE(estimate_min, ?) ELSE 0 END) AS w_done "
+        "FROM tasks WHERE project_id = ? AND deleted_at IS NULL AND status != 'cancelled'",
+        (DEFAULT_WEIGHT_MIN, DEFAULT_WEIGHT_MIN, project_id),
+    ).fetchone()
+    total = row["total"] or 0
+    done = row["done"] or 0
+    w_total = row["w_total"] or 0
+    w_done = row["w_done"] or 0
+    return {
+        "total": total,
+        "done": done,
+        "pct_tasks": round(100 * done / total, 1) if total else 0.0,
+        "pct_weighted": round(100 * w_done / w_total, 1) if w_total else 0.0,
+    }
+
+
 def period_minutes(conn: sqlite3.Connection, project_id: int | None = None, days: int = 7) -> float:
     """Total minutes of stopped sessions over the last `days` LOCAL days.
 

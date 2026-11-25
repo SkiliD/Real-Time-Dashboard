@@ -88,6 +88,24 @@ def get(conn: sqlite3.Connection, task_id: int) -> Task | None:
     return Task.from_row(row) if row else None
 
 
+def count_by_status(conn: sqlite3.Connection, project_id: int, statuses: list[str]) -> int:
+    """COUNT only (no row loading) — /api/status is polled every 1.5 s."""
+    ph = ",".join("?" for _ in statuses)
+    return conn.execute(
+        f"SELECT COUNT(*) FROM tasks WHERE project_id = ? AND deleted_at IS NULL AND status IN ({ph})",
+        [project_id, *statuses],
+    ).fetchone()[0]
+
+
+def list_brief(conn: sqlite3.Connection, project_id: int, status: str) -> list[dict]:
+    """id/title only, for header selects — full rows come from list()."""
+    rows = conn.execute(
+        "SELECT id, title FROM tasks WHERE project_id = ? AND deleted_at IS NULL AND status = ? ORDER BY id",
+        (project_id, status),
+    ).fetchall()
+    return [{"id": r["id"], "title": r["title"]} for r in rows]
+
+
 def list(
     conn: sqlite3.Connection,
     project_id: int | None = None,

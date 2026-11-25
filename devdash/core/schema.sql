@@ -57,6 +57,14 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_feature ON tasks(feature_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent  ON tasks(parent_id);
+-- v11: the poll-path list query sorts by CASE status/priority, order_index, id —
+-- an expression index matching that ORDER BY avoids a full temp-b-tree sort per call
+CREATE INDEX IF NOT EXISTS idx_tasks_sort ON tasks(
+    project_id,
+    CASE status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
+    CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+    order_index, id
+) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,6 +119,9 @@ CREATE INDEX IF NOT EXISTS idx_commits_repo  ON git_commits(repo_path);
 CREATE INDEX IF NOT EXISTS idx_commits_task  ON git_commits(parsed_task_id);
 -- committed_at is normalized UTC ISO (+00:00): lexicographic = chronological
 CREATE INDEX IF NOT EXISTS idx_commits_repo_date ON git_commits(repo_path, committed_at);
+-- v11: /api/git/commits orders by committed_at DESC, hash DESC per repo — include the
+-- hash tiebreak in the index so no temp b-tree sort is needed per poll
+CREATE INDEX IF NOT EXISTS idx_commits_repo_date_hash ON git_commits(repo_path, committed_at DESC, hash DESC);
 CREATE INDEX IF NOT EXISTS idx_commits_date ON git_commits(committed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed_at) WHERE status = 'done' AND completed_at IS NOT NULL;
 

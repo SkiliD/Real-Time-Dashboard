@@ -1,7 +1,7 @@
 # logs endpoints of the GUI REST layer (mixin of Api).
 from __future__ import annotations
 
-from .api_common import ApiError
+from .api_common import ApiError, LIST_CONTENT_MAX, truncate_field
 from devdash.core import logs
 
 class LogsMixin:
@@ -15,7 +15,23 @@ class LogsMixin:
                 limit=self._int(query.get("limit"), "limit", 200, hi=self.MAX_LIST_LIMIT),
                 trash=query.get("deleted") in ("1", "true", "yes"),  # corbeille view
             )
-            return {"count": len(rows), "entries": [r.to_dict() for r in rows]}
+            # list rows carry a truncated content (polled every 1.5 s);
+            # the full text is served by /api/logs/show
+            return {"count": len(rows),
+                    "entries": [truncate_field(r.to_dict(), "content", LIST_CONTENT_MAX) for r in rows]}
+
+
+    def logs_show(self, query: dict) -> dict:
+        """Full log entry (id required): inline edit must not save back a
+        truncated content over the full text."""
+        eid = self._int(query.get("id"), "id")
+        if eid is None:
+            raise ApiError("id is required")
+        with self._conn() as c:
+            e = logs.get(c, eid)
+            if e is None or e.deleted_at is not None:
+                raise ApiError("log not found", status=404)
+            return {"entry": e.to_dict()}
 
 
     def logs_add(self, body: dict) -> dict:

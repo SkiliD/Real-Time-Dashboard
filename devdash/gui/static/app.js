@@ -770,8 +770,8 @@ function render() {
   renderPanel("logs", [state.logs, state.logQuery], renderLogs);
   renderPanel("git", [state.gitStatus, state.gitCommits, state.gitUnparsed, state.gitTaskFilter,
                       state.gitBranches, state.gitChanges, state.gitChangesOpen, state.gitSelFile,
-                      state.gitSelFiles], renderGit);
-  renderPanel("features", state.features, renderFeatures);
+                      state.gitSelFiles, state.gitError, state.tasks], renderGit);
+  renderPanel("features", [state.features, state.tasks], renderFeatures);
   renderPanel("chat", [state.chat, state.ai, state.aiBusy], renderChat);
   renderPanel("stats", [state.stats, state.statsFilters, state.estimates], renderStats);
   renderPanel("timeline", [state.timeline, state.tlFilter], renderTimeline);
@@ -939,8 +939,8 @@ const justDoneIds = new Set(); // ids just marked done -> their card flashes gre
 
 function renderKanban() {
   // switching project = fresh board: don't pop every card, only genuinely new ones
-  if (renderKanban._pid !== (state.active && state.active.id)) {
-    renderKanban._pid = state.active && state.active.id;
+  if (renderKanban._pid !== state.active) {  // state.active is the project SLUG
+    renderKanban._pid = state.active;
     seenTaskIds.clear();
   }
   // corbeille view replaces the columns (the columns stay in the DOM, hidden)
@@ -1033,10 +1033,10 @@ function taskCard(t) {
   card.addEventListener("keydown", (e) => {
     // typing inside the card (subtask input, button…) must NOT open the edit modal
     if (e.target.closest("input, textarea, select, button")) return;
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTaskModal(t); }
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTaskModal(t).catch(() => {}); }
   });
   const tags = t.tags.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("");
-  const est = t.estimate_min ? `<span class="est">${T("gui.est", { n: t.estimate_min })}</span>` : "";
+  const est = t.estimate_min != null ? `<span class="est">${T("gui.est", { n: t.estimate_min })}</span>` : ""; // 0 min is a real estimate
   const mins = Math.round((state.timeByTask || {})[t.id] || 0);
   // estimate vs actual on one chip: ⏱ 132m/90m, tinted when off the estimate
   let timeBadge = "";
@@ -1138,7 +1138,7 @@ function taskCard(t) {
     }); };
   });
   // click on the card (not on a button) opens the edit modal
-  card.onclick = () => openTaskModal(t);
+  card.onclick = () => openTaskModal(t).catch(() => {});
   // NOTE: dropping a card ON another card (=> subtask) is handled by DELEGATED
   // listeners on the static .cards zones (wireSubtaskDnD), not per-card: the
   // zones are never re-rendered, so the handlers survive renderKanban() and
@@ -1180,7 +1180,7 @@ function subCard(t, depth) {
   const kidBadge = kids.length ? ` <span class="dim">☑${kidsDone}/${kids.length}</span>` : "";
   el.innerHTML = `<span class="sub-icon">${icon}</span> <span class="sub-title">#${t.id} ${escapeHtml(t.title)}</span>${kidBadge}`;
   el.title = `#${t.id} ${t.title}`;
-  el.onclick = (e) => { e.stopPropagation(); openTaskModal(t); };
+  el.onclick = (e) => { e.stopPropagation(); openTaskModal(t).catch(() => {}); };
   if (t.status !== "done" && t.status !== "cancelled") {
     const ok = document.createElement("button");
     ok.className = "mini-btn sub-done";
@@ -1318,9 +1318,13 @@ function modalTrapTab(e) {
 
 /* ---------- task edit modal ---------- */
 
-function openTaskModal(t) {
+async function openTaskModal(t) {
   rememberFocus();
   state.editingTaskId = t.id;
+  // the list payload truncates long descriptions: fetch the full row so saving
+  // the modal can never write the truncated text back over the full one
+  const full = await api.get("/api/tasks/show?id=" + t.id).catch(() => null);
+  if (full && full.task) t = full.task;
   // set only the text span: textContent on the h3 would destroy the copy button
   $("#task-modal-title-text").textContent = T("gui.task.edit_title", { id: t.id });
   $("#t-title").value = t.title;
@@ -1504,19 +1508,23 @@ function renderLogs() {
       continue;
     }
     // inline edit: swap the content div for an input, save on Enter/blur
-    li.querySelector(".log-edit").onclick = () => {
+    li.querySelector(".log-edit").onclick = async () => {
+      // list rows truncate long content: fetch the full entry before editing,
+      // so saving can never write the truncated text back over the full one
+      const full = await api.get("/api/logs/show?id=" + e.id).catch(() => null);
+      const content = (full && full.entry && full.entry.content) || e.content;
       const div = li.querySelector(".log-content");
       const input = document.createElement("input");
       input.type = "text";
       input.className = "log-edit-input";
-      input.value = e.content;
+      input.value = content;
       div.replaceWith(input);
       input.focus();
       let cancelled = false; // Escape cancels instead of saving via the induced blur
       const save = () => runAction(async () => {
         if (cancelled || !input.isConnected) return; // Escape removed it / already saved
         const v = input.value.trim();
-        if (v && v !== e.content) await api.post("/api/logs/update", { id: e.id, content: v });
+        if (v && v !== content) await api.post("/api/logs/update", { id: e.id, content: v });
         await loadAll();
       });
       input.addEventListener("keydown", (ev) => {
@@ -2626,12 +2634,15 @@ function closeModal() { hideAnimated($("#modal")); restoreFocus(); }
 
 // live-detect an existing project folder: engine + git repo + suggested name
 let detectTimer = null;
+let detectSeq = 0; // out-of-order /api/detect responses must not overwrite a newer path's hint
 async function detectFolder() {
   const path = $("#f-path").value.trim();
   const hint = $("#f-detect");
   if (!path) { hint.textContent = ""; return; }
+  const seq = ++detectSeq;
   try {
     const d = await api.get("/api/detect?path=" + encodeURIComponent(path));
+    if (seq !== detectSeq) return; // a newer keystroke already fired: stale response
     if (!d.is_dir) {
       hint.textContent = T("gui.modal.detect_none");
       return;
@@ -3098,7 +3109,7 @@ api.get("/api/i18n")
     loadAll().then(() => {
       switchTab(state.tab);
       // tour flag is read from the DB (origin-proof), not only localStorage
-      api.get("/api/tour").then((r) => { state.tourDone = state.tourDone || !!r.done; })
+      api.get("/api/tour").then((r) => { state.tourDone = !!r.done; })  // server flag is authoritative (localStorage is only a pre-boot hint)
         .catch(() => {})
         .finally(() => { if (!state.tourDone) startTour(); }); // first launch: guided tour
       // the help shortcut doc must match the number of VISIBLE tabs (AI tab can be hidden)
@@ -3293,7 +3304,7 @@ function paletteItems(query) {
     { key: "tasks", items: state.tasks
         .filter((x) => x.status !== "done" && x.status !== "cancelled").slice(0, PALETTE_TASKS)
         .map((t) => ({ label: T("gui.cmd.open_task", { id: t.id, title: t.title }),
-                       run: () => { switchTab("tasks"); openTaskModal(t); } })) },
+                       run: () => { switchTab("tasks"); openTaskModal(t).catch(() => {}); } })) },
     { key: "logs", items: (state.logs || []).slice(0, PALETTE_LOGS)
         .map((e) => ({ label: e.content.slice(0, 80), run: () => {
           switchTab("log");
@@ -3423,7 +3434,7 @@ document.addEventListener("keydown", (e) => {
     case "/": switchTab("tasks"); $("#filter-search").focus(); e.preventDefault(); break;
     case "s": runAction(async () => { state.session ? await stopSession() : await startSession(); }); break;
     case "r": runAction(loadAll); break;
-    case "1": case "2": case "3": case "4": case "5": case "6": case "7": {
+    case "1": case "2": case "3": case "4": case "5": case "6": case "7": case "8": {
       const tab = tabOrder()[Number(e.key) - 1];
       if (tab) switchTab(tab);
       break;
