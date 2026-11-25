@@ -42,7 +42,6 @@ def context_cmd(ctx: typer.Context) -> None:
     """Show the compact project context that WOULD be sent to the AI.
 
     Purely local: nothing is sent anywhere, even with the AI enabled."""
-    from devdash.core.ai import context as ctx_mod
     conn = get_conn(ctx)
     r = assistant.context_preview(conn, home=cfgmod.devdash_home())
     emit(ctx, r, lambda: (

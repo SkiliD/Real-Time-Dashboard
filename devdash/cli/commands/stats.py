@@ -115,6 +115,33 @@ def tags_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--pro
     emit(ctx, data, render)
 
 
+@app.command("estimates", help=tr("stats.estimates.help"))
+def estimates_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
+    """Estimate vs actual: per-task estimate_min against worked minutes + aggregate."""
+    conn, pid = _pid(ctx, project)
+    data = {"project": pid, **stats.estimates(conn, pid)}
+
+    def render() -> None:
+        rows = data["tasks"]
+        table = Table(title=tr("stats.estimates.table"))
+        for col in tr_cols("stats.estimates.cols"):
+            table.add_column(col)
+        for r in rows:
+            est = "-" if r["estimate_min"] is None else f"{r['estimate_min']}"
+            delta = "-" if r["delta_min"] is None else f"{r['delta_min']:+.0f}"
+            ratio = "-" if r["ratio"] is None else f"x{r['ratio']:.2f}"
+            table.add_row(f"#{r['id']}", r["title"][:40], tr("tstatus." + r["status"]),
+                          est, f"{r['actual_min']:.0f}", delta, ratio)
+        console.print(table)
+        a = data["agg"]
+        pct = f"{a['pct_of_estimate']}%" if a["pct_of_estimate"] is not None else "-"
+        console.print(tr("stats.estimates.agg", n=a["with_estimate"], est=a["est_total_min"],
+                         act=f"{a['actual_on_estimated_min']:.0f}", pct=pct,
+                         over=a["over"], under=a["under"]))
+
+    emit(ctx, data, render)
+
+
 @app.command("all", help=tr("stats.all.help"))
 def all_cmd(ctx: typer.Context, project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default"))) -> None:
     """Everything: today, week, month, streak, tags, progress."""

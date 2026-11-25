@@ -121,11 +121,15 @@ def seed(conn: sqlite3.Connection) -> dict:
     _backdate_log(conn, e3.id, 3)
     _backdate_log(conn, e4.id, 0)
 
+    # counts are computed, not hardcoded, so they stay true if the dataset grows
+    def _count(sql: str, args=()) -> int:
+        return conn.execute(sql, args).fetchone()[0]
+
     return {
-        "projects": 2,
-        "features": 1,
-        "tasks": 8,
-        "sessions": 6,
-        "log_entries": 5,
+        "projects": _count("SELECT COUNT(*) FROM projects"),
+        "features": _count("SELECT COUNT(*) FROM features"),
+        "tasks": _count("SELECT COUNT(*) FROM tasks"),
+        "sessions": _count("SELECT COUNT(*) FROM sessions"),
+        "log_entries": _count("SELECT COUNT(*) FROM log_entries"),
         "active_project": p1.slug,
     }

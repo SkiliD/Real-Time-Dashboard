@@ -275,7 +275,7 @@ def test_feature_delete_detaches_tasks_and_cleans_events(conn):
     t = tsk.add(conn, p.id, "task-1")
     feats.attach(conn, f.id, t.id)
     fid = f.id
-    f = feats.delete(conn, fid, p.id)
+    f = feats.delete(conn, fid, p.id, permanent=True)  # hard delete (default is soft/trash)
     assert f.name == "dash"
     # feature gone
     assert feats.get(conn, fid) is None
@@ -302,8 +302,8 @@ def test_api_features_update_and_delete(api):
     with pytest.raises(ApiError) as e:
         api.features_update({"ref": "air-dash", "name": "jump"})
     assert e.value.status == 400
-    # delete via API detaches the task
-    r = api.features_delete({"ref": "air-dash"})
+    # delete via API detaches the task (permanent; default is soft/trash)
+    r = api.features_delete({"ref": "air-dash", "permanent": True})
     assert r["deleted"] == f["id"]
     t2 = next(x for x in api.tasks({"q": "task-1"})["tasks"] if x["id"] == t["id"])
     assert t2["feature_id"] is None
@@ -403,10 +403,171 @@ def test_gui_server_falls_back_when_port_busy(home):
 
 def test_theme_setting_validated_and_saved(api, home):
     from devdash.core import config as cfgmod
-    assert api.settings_get()["general"]["theme"] == "dark"  # default
+    assert api.settings_get()["general"]["theme"] == "auto"  # default follows the OS
+    assert api.settings_save({"theme": "auto"})["settings"]["general"]["theme"] == "auto"
     r = api.settings_save({"theme": "light"})
     assert r["settings"]["general"]["theme"] == "light"
     assert cfgmod.load_config(home).theme == "light"  # persisted in config.json
     with pytest.raises(ApiError) as e:
         api.settings_save({"theme": "neon"})
     assert e.value.status == 400
+
+
+# --- read-only git runner --------------------------------------------------------
+
+def _make_repo(tmp_path: Path) -> Path:
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {"PATH": __import__("os").environ["PATH"], "GIT_CONFIG_NOSYSTEM": "1",
+           "HOME": str(tmp_path)}
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, env=env)
+    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=repo, check=True, capture_output=True, env=env)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True, capture_output=True, env=env)
+    (repo / "a.txt").write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True, env=env)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, env=env)
+    return repo
+
+
+def test_git_run_readonly_allowlist(tmp_path):
+    repo = _make_repo(tmp_path)
+    ok = gitwatch.run_readonly(str(repo), "git log --oneline")
+    assert ok["ok"] and "init" in ok["stdout"]
+    ok = gitwatch.run_readonly(str(repo), "status --short")
+    assert ok["ok"]
+    ok = gitwatch.run_readonly(str(repo), "branch -a")
+    assert ok["ok"]
+    # every write / escape attempt must come back ok=false, never executed
+    refused = [
+        "git push",
+        "git commit -m x",
+        "git branch -d main",
+        "git branch newb",            # positional arg would create a ref
+        "git tag v1",                 # same for tags
+        "git diff --output=/tmp/evil",
+        "git -C /etc status",
+        "log --exec=evil",
+        "status; rm -rf /",
+        "remote add origin http://x",
+        "", "   ",
+        "x" * 600,
+    ]
+    for cmd in refused:
+        r = gitwatch.run_readonly(str(repo), cmd)
+        assert not r["ok"], cmd
+        assert r["stderr"], cmd
+    # shell metacharacters are inert: no shell means they are just inert argv
+    # tokens for git — nothing is executed and nothing is written
+    for cmd in ["status | cat", "status > out.txt", "status && echo pwned", "status `id`"]:
+        gitwatch.run_readonly(str(repo), cmd)
+    assert not (repo / "out.txt").exists()
+    assert sorted(p.name for p in repo.iterdir() if p.name != ".git") == ["a.txt"]
+    # repo untouched: still exactly one commit, no extra refs
+    r = gitwatch.run_readonly(str(repo), "log --oneline")
+    assert len([l for l in r["stdout"].splitlines() if l.strip()]) == 1
+    r = gitwatch.run_readonly(str(repo), "tag")
+    assert r["stdout"].strip() == ""
+
+
+def test_api_git_run(api, tmp_path):
+    from devdash.gui import server
+    assert "/api/git/run" in server.POST_ROUTES
+    # no linked repo -> 400
+    with pytest.raises(ApiError) as e:
+        api.git_run({"cmd": "status"})
+    assert e.value.status == 400
+    with pytest.raises(ApiError) as e:
+        api.git_run({})  # missing cmd
+    assert e.value.status == 400
+    repo = _make_repo(tmp_path)
+    api.git_link({"path": str(repo)})
+    r = api.git_run({"cmd": "git rev-parse --is-inside-work-tree"})
+    assert r["ok"] and r["stdout"].strip() == "true"
+    assert r["project"] == "game" and r["repo"] == str(repo)
+    r = api.git_run({"cmd": "git push"})
+    assert not r["ok"] and "not allowed" in r["stderr"]
+
+
+# --- git "GitHub Desktop" views: changes / branches / open (read-only) --------
+
+def test_parse_porcelain_and_numstat():
+    text = ' M src/main.py\nA  new.txt\n?? scratch.md\nR  "old name.txt" -> "new name.txt"\n'
+    rows = gitwatch.parse_porcelain(text)
+    assert [r["path"] for r in rows] == ["src/main.py", "new.txt", "scratch.md", "new name.txt"]
+    assert rows[0]["kind"] == "modified" and rows[0]["staged"] is False
+    assert rows[1]["kind"] == "added" and rows[1]["staged"] is True
+    assert rows[2]["kind"] == "untracked" and rows[2]["staged"] is False
+    assert rows[3]["kind"] == "renamed"
+    num = gitwatch.parse_numstat("3\t1\tsrc/main.py\n-\t-\tbin.dat\n10\t0\tnew.txt\n")
+    assert num["src/main.py"] == (3, 1) and num["bin.dat"] == (0, 0) and num["new.txt"] == (10, 0)
+
+
+def test_gitwatch_changes_and_branches(tmp_path):
+    repo = _make_repo(tmp_path)
+    # one modified tracked file + one untracked file
+    (repo / "a.txt").write_text("hello world\n", encoding="utf-8")
+    (repo / "scratch.md").write_text("x\n", encoding="utf-8")
+    ch = gitwatch.changes(str(repo))
+    assert ch["ok"] and ch["count"] == 2
+    by_path = {f["path"]: f for f in ch["files"]}
+    # "hello\n" -> "hello world\n": one line replaced = 1 insertion + 1 deletion
+    assert by_path["a.txt"]["kind"] == "modified"
+    assert by_path["a.txt"]["added"] == 1 and by_path["a.txt"]["deleted"] == 1
+    assert by_path["scratch.md"]["kind"] == "untracked"
+    br = gitwatch.branches(str(repo))
+    assert br["ok"] and br["current"] in {b["name"] for b in br["branches"]}
+    cur = [b for b in br["branches"] if b["current"]]
+    assert len(cur) == 1 and cur[0]["short"] and cur[0]["subject"] == "init"
+
+
+def test_api_git_changes_branches_open(api, tmp_path, monkeypatch):
+    from devdash.gui import server
+    for route in ("/api/git/changes", "/api/git/branches", "/api/git/open"):
+        assert route in server.POST_ROUTES
+    # no linked repo -> clean 400 on all three
+    for fn in (api.git_changes, api.git_branches, api.git_open):
+        with pytest.raises(ApiError) as e:
+            fn({})
+        assert e.value.status == 400
+    repo = _make_repo(tmp_path)
+    api.git_link({"path": str(repo)})
+    ch = api.git_changes({})
+    assert ch["ok"] and ch["repo"] == str(repo) and ch["project"] == "game"
+    br = api.git_branches({})
+    assert br["ok"] and br["current"]
+    # git_open must invoke the OS opener on the LINKED repo only (no shell)
+    calls = []
+    monkeypatch.setattr("devdash.gui.api.subprocess.Popen",
+                        lambda cmd, **kw: calls.append(cmd))
+    r = api.git_open({})
+    assert r["opened"] == str(repo)
+    assert len(calls) == 1 and calls[0][-1] == str(repo) and isinstance(calls[0], list)
+
+
+def test_api_git_changes_linked_task(api, tmp_path, conn):
+    repo = _make_repo(tmp_path)
+    (repo / "a.txt").write_text("changed\n", encoding="utf-8")  # uncommitted change
+    api.git_link({"path": str(repo)})
+    # no session, no parsed commit -> no linked task
+    ch = api.git_changes({})
+    assert ch["ok"] and ch["count"] >= 1 and ch["linked_task"] is None
+    # running session on a task -> source "session"
+    t = api.tasks_add({"title": "Fix HUD"})
+    api.session_start({"task_id": t["id"]})
+    ch = api.git_changes({})
+    assert ch["linked_task"] == {"id": t["id"], "title": "Fix HUD", "status": "todo", "source": "session"}
+    api.session_stop({})
+    # no session -> fall back to the last commit's parsed task (#N in the message)
+    from devdash.core.models import now_iso
+    conn.execute(
+        "INSERT INTO git_sync_state(repo_path, last_sync_at, last_seen_hash, branch) VALUES (?, ?, ?, 'main')",
+        (str(repo), now_iso(), "b" * 40))
+    conn.execute(
+        "INSERT INTO git_commits(repo_path, hash, short, author, message, branch, committed_at, parsed_task_id) "
+        "VALUES (?, ?, 'def5678', 'me', 'fix: HUD #' || ?, 'main', ?, ?)",
+        (str(repo), "c" * 40, t["id"], now_iso(), t["id"]))
+    conn.commit()
+    ch = api.git_changes({})
+    lt = ch["linked_task"]
+    assert lt and lt["id"] == t["id"] and lt["source"] == "commit" and lt["commit"] == "def5678"

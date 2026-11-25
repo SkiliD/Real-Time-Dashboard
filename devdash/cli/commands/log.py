@@ -12,7 +12,7 @@ from rich.table import Table
 from devdash.core import logs as core
 from devdash.core.i18n import tr, tr_cols
 from ..deps import get_conn, guard, resolve_project, read_text_file
-from ..output import emit
+from ..output import emit, fmt_ts
 
 app = typer.Typer(help=tr("group.log.help"))
 console = Console()
@@ -51,7 +51,7 @@ def _render_log_table(entries) -> None:
     for e in entries:
         content = e.content if len(e.content) <= 80 else e.content[:77] + "…"
         table.add_row(
-            str(e.id), e.created_at[:16].replace("T", " "),
+            str(e.id), fmt_ts(e.created_at),
             ",".join(e.tags), f"#{e.task_id}" if e.task_id else "", content,
         )
     console.print(table)
@@ -112,13 +112,30 @@ def delete_log(
     ctx: typer.Context,
     entry_id: int = typer.Argument(..., help=tr("opt.id")),
     yes: bool = typer.Option(False, "--yes", "-y", help=tr("opt.yes")),
+    permanent: bool = typer.Option(False, "--permanent", help=tr("opt.permanent")),
 ) -> None:
-    """Delete a devlog entry (asks for confirmation unless --yes)."""
+    """Delete a devlog entry: soft (trash, restorable) by default, --permanent
+    for good. Asks unless --yes."""
     conn = get_conn(ctx)
     entry = core.get(conn, entry_id)
     if entry is None:
         raise typer.BadParameter(tr("err.no_log_entry", id=entry_id))
     if not yes and not typer.confirm(tr("log.delete.confirm", id=entry_id)):
         raise typer.Abort()
-    guard(core.delete, conn, entry_id)
-    emit(ctx, {"deleted": entry_id}, lambda: console.print(tr("log.deleted", id=entry_id)))
+    guard(core.delete, conn, entry_id, permanent=permanent)
+    if permanent:
+        emit(ctx, {"deleted": entry_id}, lambda: console.print(tr("log.deleted", id=entry_id)))
+    else:
+        emit(ctx, {"deleted": entry_id, "soft": True},
+             lambda: console.print(tr("log.delete.soft", id=entry_id)))
+
+
+@app.command("restore", help=tr("log.restore.help"))
+def restore_log(
+    ctx: typer.Context,
+    entry_id: int = typer.Argument(..., help=tr("opt.id")),
+) -> None:
+    """Restore a devlog entry from the trash."""
+    conn = get_conn(ctx)
+    entry = guard(core.restore, conn, entry_id)
+    emit(ctx, {"restored": entry.id}, lambda: console.print(tr("log.restored", id=entry.id)))

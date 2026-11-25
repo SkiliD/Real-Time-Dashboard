@@ -9,6 +9,15 @@ import pytest
 from devdash.core import config, db, events, gitwatch, projects
 
 
+def commits_for_task(conn, task_id: int):
+    """Test-only helper (used to live in gitwatch, used only by these tests)."""
+    return gitwatch.commits(conn, task_id=task_id, limit=500)
+
+
+def unparsed_commits(conn, repo_path=None):
+    return gitwatch.commits(conn, repo_path=repo_path, unparsed=True, limit=500)
+
+
 @pytest.fixture()
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DEVDASH_HOME", str(tmp_path))
@@ -54,13 +63,13 @@ def test_link_sync_parse_status(conn, project, git_repo, home):
     assert len(all_c) == 3
 
     # parsing: "#2" -> task 2 (even though task 2 does not exist yet: no FK)
-    by_task = gitwatch.commits_for_task(conn, 2)
+    by_task = commits_for_task(conn, 2)
     assert len(by_task) == 1 and "i-frames" in by_task[0].message
     # "feat(dash)" -> feature dash
     feats = [c for c in all_c if c.parsed_feature == "dash"]
     assert len(feats) == 1 and "dash movement" in feats[0].message
     # unparsed: the "chore: init" commit
-    unp = gitwatch.unparsed_commits(conn, repo)
+    unp = unparsed_commits(conn, repo)
     assert len(unp) == 1 and unp[0].message == "chore: init project"
 
     # status snapshot
@@ -110,5 +119,5 @@ def test_new_commit_detected_on_resync(conn, project, git_repo):
                    check=True, capture_output=True)
     res = gitwatch.sync_repo(conn, repo, config.DEFAULT_COMMIT_PATTERNS)
     assert res["new"] == 1
-    c = gitwatch.commits_for_task(conn, 5)
+    c = commits_for_task(conn, 5)
     assert len(c) == 1 and "pause menu" in c[0].message

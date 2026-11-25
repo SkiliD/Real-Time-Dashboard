@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from . import events, projects
+from . import events, i18n, projects
 from . import tasks as tsk
 from .models import Feature, check_text, now_iso
 
@@ -15,10 +15,10 @@ VALID_STATUSES = ("open", "proposed", "done", "rejected")
 def create(conn: sqlite3.Connection, project_id: int, name: str, description: str = "") -> Feature:
     name = name.strip()
     if not name:
-        raise ValueError("feature name is empty")
+        raise ValueError(i18n.tr("err.feature_name_empty"))
     description = check_text(description or "", "description")
     if projects.get(conn, project_id) is None:
-        raise KeyError(f"no project with id {project_id}")
+        raise KeyError(i18n.tr("err.no_project_id", id=project_id))
     with conn:  # row + event in one transaction
         cur = conn.execute(
             "INSERT INTO features(project_id, name, description, status, source, created_at) "
@@ -54,9 +54,12 @@ def get(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None)
     return None  # 0 matches, or ambiguous across projects -> caller raises KeyError
 
 
-def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | None = None) -> list[dict]:
-    """Features with task progress counts (single grouped query, no N+1)."""
+def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | None = None,
+         trash: bool = False) -> list[dict]:
+    """Features with task progress counts (single grouped query, no N+1).
+    Soft-deleted features are excluded unless trash=True."""
     clauses, values = [], []
+    clauses.append("deleted_at IS NOT NULL" if trash else "deleted_at IS NULL")
     if project_id is not None:
         clauses.append("project_id = ?")
         values.append(project_id)
@@ -73,6 +76,7 @@ def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | 
             "SELECT feature_id, COUNT(*) AS total, "
             "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done "
             "FROM tasks WHERE feature_id IS NOT NULL AND status != 'cancelled' "
+            "AND deleted_at IS NULL "  # soft-deleted tasks must not count (trash)
             "GROUP BY feature_id"
         ).fetchall()
     }
@@ -88,10 +92,10 @@ def list(conn: sqlite3.Connection, project_id: int | None = None, status: str | 
 def attach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: int | None = None) -> Feature:
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     t = tsk.get(conn, task_id)
     if t is None:
-        raise KeyError(f"no task #{task_id}")
+        raise KeyError(i18n.tr("err.no_task", id=task_id))
     if t.project_id != f.project_id:
         raise ValueError(
             f"task #{task_id} belongs to project #{t.project_id}, "
@@ -105,7 +109,7 @@ def attach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: i
 def detach(conn: sqlite3.Connection, ref: int | str, task_id: int, project_id: int | None = None) -> Feature:
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     t = tsk.get(conn, task_id)
     if t is not None and t.feature_id == f.id:
         tsk.update(conn, task_id, feature_id=None)
@@ -145,9 +149,9 @@ def propose(
     """Record a proposal (e.g. from the AI) — status becomes 'proposed', NOT done."""
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     if f.status == "done":
-        raise ValueError(f"feature {f.name!r} is already done")
+        raise ValueError(i18n.tr("err.feature_already_done", name=f.name))
     with conn:
         conn.execute(
             "UPDATE features SET status = 'proposed', source = ?, confidence = ?, reasoning = ? WHERE id = ?",
@@ -162,9 +166,9 @@ def approve(conn: sqlite3.Connection, ref: int | str, project_id: int | None = N
     """HUMAN DECISION — the only path to status='done'. Sets validated_at."""
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     if f.status == "done":
-        raise ValueError(f"feature {f.name!r} is already done")
+        raise ValueError(i18n.tr("err.feature_already_done", name=f.name))
     now = now_iso()
     with conn:
         conn.execute(
@@ -181,7 +185,7 @@ def reject(conn: sqlite3.Connection, ref: int | str, feedback: str = "", project
     """Human rejection of a proposal — stored as feedback, never re-proposed blindly."""
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     with conn:
         conn.execute(
             "UPDATE features SET status = 'rejected', feedback = ? WHERE id = ?",
@@ -195,7 +199,7 @@ def reject(conn: sqlite3.Connection, ref: int | str, feedback: str = "", project
 def reopen(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature:
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     with conn:
         conn.execute(
             "UPDATE features SET status = 'open', validated_at = NULL, confidence = NULL, reasoning = NULL WHERE id = ?",
@@ -217,17 +221,17 @@ def update(
     """Rename / edit a feature. Names stay unique within a project."""
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
     if name is not None:
         name = name.strip()
         if not name:
-            raise ValueError("feature name is empty")
+            raise ValueError(i18n.tr("err.feature_name_empty"))
         dup = conn.execute(
             "SELECT id FROM features WHERE project_id = ? AND name = ? AND id != ?",
             (f.project_id, name, f.id),
         ).fetchone()
         if dup:
-            raise ValueError(f"feature {name!r} already exists in this project")
+            raise ValueError(i18n.tr("err.feature_exists", name=name))
     fields, values = [], []
     if name is not None:
         fields.append("name = ?")
@@ -245,18 +249,33 @@ def update(
     return f
 
 
-def delete(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature:
-    """Hard-delete a feature (explicit human action; the GUI/CLI confirm first).
-
-    Linked tasks are NOT deleted: their feature_id is set to NULL. The feature's
-    events are cleaned up in the same transaction.
-    """
+def delete(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None,
+           permanent: bool = False) -> Feature:
+    """Delete a feature. Default = SOFT delete (corbeille, restorable via
+    restore()); permanent=True = hard delete: linked tasks keep their rows but
+    lose feature_id (SET NULL), and the feature's events are cleaned up."""
     f = get(conn, ref, project_id)
     if f is None:
-        raise KeyError(f"no feature matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
+    if permanent:
+        with conn:
+            conn.execute("DELETE FROM events WHERE entity = 'feature' AND entity_id = ?", (f.id,))
+            conn.execute("UPDATE tasks SET feature_id = NULL WHERE feature_id = ?", (f.id,))
+            conn.execute("DELETE FROM features WHERE id = ?", (f.id,))
+        events.append(conn, "feature", f.id, "deleted", {"id": f.id, "name": f.name, "permanent": True})
+        return f
     with conn:
-        conn.execute("DELETE FROM events WHERE entity = 'feature' AND entity_id = ?", (f.id,))
-        conn.execute("UPDATE tasks SET feature_id = NULL WHERE feature_id = ?", (f.id,))
-        conn.execute("DELETE FROM features WHERE id = ?", (f.id,))
-    events.append(conn, "feature", f.id, "deleted", {"id": f.id, "name": f.name})
+        conn.execute("UPDATE features SET deleted_at = ? WHERE id = ?", (now_iso(), f.id))
+    events.append(conn, "feature", f.id, "deleted", {"id": f.id, "name": f.name, "soft": True})
     return f
+
+
+def restore(conn: sqlite3.Connection, ref: int | str, project_id: int | None = None) -> Feature:
+    """Restore a soft-deleted feature."""
+    f = get(conn, ref, project_id)
+    if f is None:
+        raise KeyError(i18n.tr("err.no_feature", ref=ref))
+    with conn:
+        conn.execute("UPDATE features SET deleted_at = NULL WHERE id = ?", (f.id,))
+    events.append(conn, "feature", f.id, "restored", {"id": f.id, "name": f.name})
+    return get(conn, ref, project_id)

@@ -150,6 +150,7 @@ def test_api_update_endpoints(home, remote_and_clone, monkeypatch):
 
     st = api.update_status()  # read-only
     assert st["version"] and st["git"] is True and st["head"]
+    assert st.get("update_available") in (None, False)  # nothing fetched yet
 
     r = api.update_check({})
     assert r["update_available"] is False
@@ -158,12 +159,17 @@ def test_api_update_endpoints(home, remote_and_clone, monkeypatch):
     _git(work, "push", "-q", "origin", "main")
     r = api.update_check({})
     assert r["update_available"] is True
+    # after that fetch, the LOCAL detection in update_status sees it too (no network)
+    st2 = api.update_status()
+    assert st2["update_available"] is True and st2["behind"] >= 1
 
     # without confirm=true the mutating endpoint refuses (two-step in the GUI)
     with pytest.raises(ApiError):
         api.update_now({"reinstall": False})
     res = api.update_now({"reinstall": False, "confirm": True})
     assert res["ok"] is True and (clone / "api.txt").exists()
+    # after the ff-only pull, the local detection reports up-to-date again
+    assert api.update_status()["update_available"] is False
 
     # HTTP level
     srv = make_server(port=0, home=home)

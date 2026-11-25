@@ -15,13 +15,18 @@
 - Multi-project: switching the active project never touches other projects' data.
 - The GUI is a **real native window** (PyWebView / WebView2 on Windows), not a web
   app: no browser tab, controlled RAM, no internet required (Chart.js is vendored
-  locally).
+  locally). The window is **frameless** (no OS border) with a custom title bar (drag
+  to move, minimize / maximize / close buttons, double-click the bar to maximize);
+  in browser mode (`--browser`) the bar is hidden and the rendering is unchanged.
+  The native window also embeds the app icon (`devdash/gui/icon.ico`, multi-size)
+  for the taskbar and Alt-Tab; the `devdash.exe` executable uses it as its file
+  icon too.
 
 ---
 
 ## 1. Installation
 
-Prerequisite: **Python 3.11+** (tested with 3.13/3.15). No dependency for the core.
+Prerequisite: **Python 3.11+** (CI: tested with 3.11 and 3.13 on 3 OSes). No dependency for the core.
 
 ### Windows
 
@@ -70,7 +75,7 @@ Without installing (from the repo): `python -m devdash --help` works directly
 
 ### Standalone executable (no Python install needed)
 
-PyInstaller builds a single double-clickable binary:
+PyInstaller builds a double-clickable executable (onedir folder by default, `--onefile` for a single file):
 
 ```bash
 pip install -e ".[build]"            # adds pyinstaller
@@ -132,16 +137,22 @@ without restarting. Read-only endpoints also expose the tag list (`GET /api/tags
 the linked Git repos (`GET /api/git/repos`) and the files in `DEVDASH_HOME`
 (`GET /api/files`: backups/exports, never `config.json`), confined to the local
 home directory. `POST /api/features/propose` (read-only too: AI proposals
-awaiting human approval). `POST /api/fs/pick` opens the OS-native folder picker on the
+awaiting human approval). `GET /api/session/current` (running session) and `GET /api/tasks/tree` (tree with rollups) are also exposed as **public API** (tests / external consumers), even though the GUI reads the session via `/api/status` and builds the tree client-side. `POST /api/fs/pick` opens the OS-native folder picker on the
 desktop and returns the chosen path (or `null` if cancelled) — the GUI only
 pre-fills the path input; connecting a folder or linking a repo stays an
 explicit user action.
 
-Tabs: **Tasks** (kanban), **Devlog**, **Git**, **Features**, **Stats** (embedded
-Chart.js charts), **AI Assistant** (only visible when AI is enabled), **Settings**
+Tabs: **Tasks** (kanban with Notion/Trello-style stackable subtasks: drop a card
+onto another = subtask, x/y progress bar on the parent, "＋ subtask" button,
+stacked/flat toggle in the toolbar; for big projects: collapsible columns
+(click the header, persisted), 40-cards-per-column cap with a "▸ show N more"
+button, and a "✖ filters" reset button; a "Trash" checkbox shows soft deletions — deletions (tasks, devlog, features) are **soft** by default, restorable, permanent in 2 clicks from the trash), **Devlog**, **Git**, **Features**, **Stats** (embedded
+Chart.js charts + an "Estimate vs actual" box (estimate vs time actually logged, per task and
+aggregated) + a "⬇ Weekly report (.md)" button), **Timeline** (project activity feed — tasks,
+sessions, devlog, git commits, features — newest first, with a type filter), **AI Assistant** (only visible when AI is enabled; the chat history is **persisted** in the db and can be cleared from the tab), **Settings**
 (always visible: AI provider local or cloud + connection test + enabled features,
 but also interface language, Pomodoro, Git watcher interval, GUI port, commit
-patterns, and a zip backup button).
+patterns, theme (dark / light / **auto** = follows the OS), **auto backup** (every N days, keeps the last K zips), and a zip backup button).
 
 ## 4. CLI reference
 
@@ -152,33 +163,47 @@ for machine-readable output.
 |---|---|---|
 | `projects list` | `devdash projects list` | list, `*` = active |
 | `projects create` | `devdash projects create "Aether Vale" --engine unity --status development --color #7c5cff --set-active` | `--engine`, `--status`, `--color`, `--description`, `--set-active` |
-| `projects connect <path>` | `devdash projects connect "C:\games\aether-vale" --set-active` | **connect an existing folder**: engine auto-detected (`ProjectSettings/ProjectVersion.txt` → unity, `*.uproject` → unreal, `project.godot` → godot, `package.json` → web), name suggested from the folder, git root found by walking up the tree and **auto-linked read-only** (commits imported immediately); `--no-git` to skip, `--engine` to force |
+| `projects connect <path>` | `devdash projects connect "C:\games\aether-vale" --set-active` | **connect an existing folder**: engine auto-detected (`ProjectSettings/ProjectVersion.txt` → unity, `*.uproject` → unreal, `project.godot` → godot, `package.json` → web), name suggested from the folder, git root found by walking up the tree and **auto-linked read-only** (commits imported immediately); `--no-git` to skip, `--engine` to force. The folder is **remembered** on the project (`path` column) |
+| `projects open [ref]` | `devdash projects open` | opens the project's **connected folder** (active by default) in the OS file explorer — GUI: 📂 buttons in the sidebar and the header ; MCP: `devdash_projects_open` ; API: `POST /api/projects/open`. Server-stored path, opened as argv without a shell, clean 400 if it no longer exists |
 | `projects set-active <ref>` | `devdash projects set-active aether-vale` | **lossless**: a simple pointer, other projects keep everything |
-| `projects show/update/archive` | `devdash projects show aether-vale` | detail, edit, archive. **Hard delete**: available from the GUI (sidebar ✎ → Delete, two-click confirmation) via `POST /api/projects/delete` — full cascade (tasks, sessions, devlog, linked commits), the active project is reassigned |
-| `task add` | `devdash task add "Dash" -p high -t gameplay -t combat --est 90` | `-p` project (default: active), `--parent` for subtasks |
-| `task list` | `devdash task list -s todo --priority high --tag ui --feature dash` | filters: status/priority/tag/feature |
+| `projects show/update/archive` | `devdash projects show aether-vale` ; `devdash projects update aether-vale --status beta` ; `devdash projects archive aether-vale` | detail, edit, archive. **Hard delete**: `devdash projects delete aether-vale` (confirmation required) or from the GUI (sidebar ✎ → Delete, two clicks) via `POST /api/projects/delete` — full cascade (tasks, sessions, devlog, linked commits), the active project is reassigned |
+| `task add` | `devdash task add "Dash" -p high -t gameplay -t combat --est 90` | `-p` project (default: active), `--parent` for subtasks, `--feature <id>` (numeric id, e.g. `--feature 3`) to link a feature at creation |
+| `task list` | `devdash task list -s todo --priority high --tag ui --feature dash --limit 20` | filters: status/priority/tag/feature + `--limit` for big projects |
+| `task tree` | `devdash task tree` | hierarchy: subtasks stacked under their parent + (done/total) rollup |
+| `task show <id>` | `devdash task show 3` | one task's detail + its subtasks |
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | status change |
-| `task edit <id>` | `devdash task edit 3 --priority critical --tag vfx` | edit |
-| `task delete <id>` | `devdash task delete 3 --yes` | permanent delete (subtasks cascade) |
+| `task edit <id>` | `devdash task edit 3 --priority critical --parent 7` / `--unparent` | edit; `--parent N` stacks the task under #N (cycle-safe), `--unparent` detaches it |
+| `task delete <id>` | `devdash task delete 3 --yes` | **soft** delete by default (trash, subtasks follow); `--permanent` = for good |
+| `task restore <id>` | `devdash task restore 3` | restores a task from the trash (with its subtasks) |
 
 Projects also have a **color** (it themes the UI while the project is active) and **languages** (`--lang csharp --lang gdscript`, editable in the GUI): `devdash projects create "My Game" --engine unity --lang csharp`.
 | `session start` | `devdash session start --task 3 --kind focus --pomodoro` | interactive timer; `--background` to return the prompt, `--pomodoro` = after focus, offers to auto-start the break |
 | `session stop` | `devdash session stop --note "done: X, blocked: Y"` | duration + end note |
 | `session now` / `session list` | `devdash session list --week` | running session / history (`--today`, `--week`, `-t <task id>`) |
 | `log add` | `devdash log add "idea: chained air dash" --tag idea` | devlog entry |
-| `log recent` / `log search` | `devdash log search "cooldown"` | dated, searchable journal |
+| `log recent` / `log list` / `log search` | `devdash log search "cooldown"` | dated, searchable journal (`list` = alias of `recent`) |
+| `log edit` / `log delete` / `log restore <id>` | `devdash log delete 5 --yes` ; `devdash log restore 5` | edit; **soft** delete by default (trash), `--permanent` = for good |
 | `git link <path>` | `devdash git link "C:\repo"` | links the active project to a repo (read-only) |
+| `git unlink` | `devdash git unlink` | unlinks the repo from the active project (cached commits are kept) |
 | `git sync` | `devdash git sync` | imports new commits (all projects if `-p` omitted) |
 | `git log` | `devdash git log --task 3` | commits linked to a task (`--unparsed` = unrecognized) |
 | `git status` | `devdash git status` | branch, last commit, commits/day |
+| `git run <cmd>` | `devdash git run "log --oneline -5"` | runs a **read-only** git command in the linked repo (GUI: terminal row in the Git tab; MCP: `devdash_git_run`). Allowlist of subcommands (`log`, `diff`, `status`, `branch -a`…), no shell, forbidden options denied, confined to the linked repo, timeout — write commands like `push`/`commit`/`branch -d` are refused with an explanation |
+| `git fetch` | `devdash git fetch` | updates remote-tracking refs of the linked repo (remote read; GUI: "⇩ Fetch" button; MCP: `devdash_git_remote`) |
+| `git pull` | `devdash git pull` | fast-forwards the branch **only** (`--ff-only`, never a forced merge; GUI: "⇩ Pull"; MCP: `devdash_git_remote`) |
+| `git remote` | `devdash git remote` | lists the configured remotes of the linked repo (`remote -v`, read-only; MCP: `devdash_git_remote`) |
 | `git ignore` | `devdash git ignore [--repo <path>]` | writes/refreshes the **marker-delimited block** `# >>> devdash >>>` in the linked repo's `.gitignore`: `.devdash/`, `devdash.db*`, snapshots, `devdash-backup-*.zip`, `devdash-export-*.json`, and `<home>/config.json` when `DEVDASH_HOME` lives inside the repo (API keys). Idempotent (never duplicated), existing content preserved. **The only file DevDash ever writes in your repo, and only on this explicit command** — git history stays untouched |
 | `feature add/list/show` | `devdash feature add dash` ; `devdash feature list` ; `devdash feature show dash` | create/list/detail (progress, linked tasks) |
+| `feature propose <name>` | `devdash feature propose dash` | records a proposal (used by the AI assistant; NEVER marks done) |
 | `feature link/unlink` | `devdash feature link dash 3 4` ; `devdash feature unlink dash 3` | attach/detach tasks |
 | `feature done/reopen` | `devdash feature done dash` ; `devdash feature reopen dash` | **manual** feature validation (only a human can close a feature) |
 | `feature approve/reject` | `devdash feature reject dash --feedback "not tested enough"` | approve/reject an AI proposal (rejections are remembered) |
-| `feature edit/delete` | `devdash feature edit dash --name air-dash` ; `devdash feature delete dash --yes` | rename (unique per project) / permanent delete (tasks are detached, never deleted); also editable from the GUI (✎/🗑 on the feature card) via `POST /api/features/update` and `POST /api/features/delete` |
+| `feature edit/delete` | `devdash feature edit dash --name air-dash` ; `devdash feature delete dash --yes` | rename (unique per project) / **soft** delete by default (trash, restorable via `feature restore`) — `--permanent` = for good (tasks are detached, never deleted); also editable from the GUI (✎/🗑 on the feature card) via `POST /api/features/update` and `POST /api/features/delete` |
 | `status` | `devdash status` ; `devdash status --watch` | real-time snapshot (tasks, session, streak, git) |
 | `stats today/week/month/streak/tags/all` | `devdash stats week` | time, tasks done, streak, per-tag breakdown |
+| `stats estimates` | `devdash stats estimates` | **estimate vs actual**: each task's estimate vs minutes actually worked (sessions), + aggregate (estimated/actual totals, %, over/under counts) |
+| `timeline` | `devdash timeline --limit 50 [--type task]` | **activity feed** of the project (event bus: tasks, sessions, devlog, git commits…), newest first; GUI: Timeline tab, MCP: `devdash_timeline` |
+| `report` | `devdash report --period week [--out report.md] [--ai]` | **markdown report** week/month, 100 % local (time per day, tasks done, linked commits, devlog, estimate vs actual); `--ai` appends the AI summary when configured; GUI: "⬇ Weekly report" button in Stats (`POST /api/report`), MCP: `devdash_report` |
 | `ai context` | `devdash ai context` | **shows the exact context** that would be sent to the AI — nothing is sent, even with AI enabled |
 | `ai ask` | `devdash ai ask "where do I stand?"` | chat (if AI enabled) |
 | `ai summarize` | `devdash ai summarize --period week` | weekly summary |
@@ -191,9 +216,11 @@ Projects also have a **color** (it themes the UI while the project is active) an
 | `export` | `devdash export --out export.json` | **full JSON export** (all tables) for archive/migration/inspection — read-only |
 | `import` | `devdash import export.json [--force]` | restores a JSON export into the database (refused if the DB is not empty, unless `--force`) |
 | `mcp` | `devdash mcp` | **MCP server** (stdio JSON-RPC) to connect DevDash to an external AI agent |
+| `mcp-config` | `devdash mcp-config vscode [--write]` | print (or write) the MCP config snippet for VS Code, Cursor, Vibe or Claude Desktop |
 | `gui` | `devdash gui` | native desktop window |
 | `version` | `devdash version` | version + git hash of the checkout |
 | `update` | `devdash update [--check] [--no-reinstall]` · `update check` · `update status` | **self-update**: git install → `git pull --ff-only` (never forced, refused on a dirty tree) + `pip install -e .` to refresh deps; pip/pipx install → prints the right command; executable → rebuild. Returns `restart_needed`. GUI: "Update" card in Settings (`GET /api/update/status`, `POST /api/update/check`, `POST /api/update`) |
+| `build` | `devdash build [--onefile] [--no-gui] [--no-console]` | **builds the standalone executable** (`dist/devdash/devdash.exe`, launchable without a command — double-click) via PyInstaller (required: `pip install -e ".[build]"`, 100 % local build, no network); `--onefile` = single file, `--no-gui` = CLI-only exe, `--no-console` = windowed exe. GUI: "Executable (.exe)" card in Settings (`POST /api/build/run`, `GET /api/build/status`). Unsigned exe: SmartScreen "Run anyway" on first launch, and AppLocker/WDAC may block an unsigned exe — sign with `scripts/sign_exe.ps1` |
 
 ### Git commit conventions
 
@@ -205,7 +232,26 @@ Messages are linked to tasks/features through configurable regexes
 - `feat(dash): ...` → feature "dash"
 
 Unrecognized commits are listed separately (`git log --unparsed`).
-**No Git write operations**: DevDash only runs `git log` / `git rev-parse`.
+
+**GitHub-Desktop-style Git tab** (all read-only): local-branches selector
+(picking one shows its recent commits), a "Changed files" panel
+(`git status --porcelain` + `diff --numstat`: status badge + +/- counts,
+click = file diff), an "📂 Open repo" button for the OS file explorer, and a
+`git$` terminal for allowlisted commands
+(`POST /api/git/run`, `/api/git/changes`, `/api/git/branches`, `/api/git/open`).
+"⇩ Fetch" / "⇩ Pull" buttons (`POST /api/git/remote`: allowlist `fetch`,
+`pull --ff-only`, `remote -v` — **any remote write is refused**, project rule),
+and in the "Changed files" panel checkboxes + "All" + "Diff selection"
+(`POST /api/git/diff`: combined read-only diff of the checked files, paths
+validated and confined to the repo, "staged" option for `--cached`); the list
+refreshes in real time (git watcher + 1.5 s polling).
+**Linked-task detection**: when uncommitted changes exist, `/api/git/changes`
+returns `linked_task` (the running session's task first, else the last parsed
+commit's `#42`/`task-42:`) and the GUI shows a "🧩 changes linked to #N" banner
+with "✔ Mark #N done" (**two-click confirm** — completion is never affirmed
+without a human click) plus "🤖 Verify with AI" (read-only verdict; a positive
+verdict reveals the "Approve and mark done" button).
+**No Git write operations**: DevDash only runs read-only git commands (`git log` / `git rev-parse` during sync; `git run` uses a read-only allowlist; `git remote` only accepts `-v`, `git pull` requires `--ff-only` — see above).
 
 ### Auto-syncing commits (optional, with Vibe)
 
@@ -255,15 +301,34 @@ task/log, session, stats, read-only git, …):
 
 **Vibe** — `~/.vibe/config.toml` (or the project's `.vibe/`):
 ```toml
-[mcp_servers.devdash]
+[[mcp_servers]]
+name = "devdash"
 command = "devdash"
 args = ["mcp"]
 ```
 
-Exposed tools (16): `devdash_status`, `devdash_projects_list`, `devdash_tasks_list`,
-`devdash_task_add`, `devdash_task_set_status`, `devdash_task_verify`,
+**VS Code** (Copilot / Cline / any MCP-capable extension) — `.vscode/mcp.json` in
+the workspace:
+```json
+{ "servers": { "devdash": { "type": "stdio", "command": "python", "args": ["-m", "devdash", "mcp"] } } }
+```
+(or with the venv/standalone binary as `command`). One command prints or writes
+the snippet for any supported editor:
+```bash
+devdash mcp-config vscode            # print the snippet for .vscode/mcp.json
+devdash mcp-config vscode --write    # write/merge it directly
+devdash mcp-config cursor|vibe|claude-desktop
+```
+
+Exposed tools (23): `devdash_status`, `devdash_projects_list`, `devdash_projects_open` (opens the connected folder in the OS explorer), `devdash_tasks_list`,
+`devdash_tasks_tree`, `devdash_context` (**one-call full project context bundle** —
+project, progress, open task tree with subtask rollups, recent logs, git snapshot
+with recent commits, today's stats — so an AI inside VS Code can follow the project
+without chaining calls), `devdash_task_add` (`parent` param = subtask),
+`devdash_task_set_status`, `devdash_task_verify`,
 `devdash_session_start/stop`, `devdash_log_add/search`, `devdash_stats`,
-`devdash_git_status/log`, `devdash_features_list`, `devdash_ai_ask`,
+`devdash_git_status/log/run/remote` (`remote` = `fetch` / `pull --ff-only` / `remote -v`, remote writes refused), `devdash_timeline` (activity feed), `devdash_report` (week/month markdown report),
+`devdash_features_list`, `devdash_ai_ask`,
 `devdash_ai_suggest` (if AI is enabled).
 Same rule everywhere: **no destructive action**, read-only git, and a feature is
 **never** marked done by the agent.
@@ -286,6 +351,8 @@ All data lives in **a single folder**:
   never includes a secret.
 - Several independent projects = several `DEVDASH_HOME`s, or one folder with
   several projects (switching the active project without losing progress).
+- **Auto backup**: at GUI startup, a `devdash-backup-*.zip` is written every N
+  days (the "Data" settings card, 0 = disabled) and only the last K are kept.
 
 ### Data schema (summary, see `devdash/core/schema.sql`)
 
@@ -293,24 +360,50 @@ All data lives in **a single folder**:
 |---|---|
 | `meta` | key/value pairs (e.g. `active_project_id`) |
 | `projects` | slug, name, description, engine, color, status, archived |
-| `features` | name, status (`open/proposed/done/rejected`), source (manual/AI), confidence, reasoning, feedback, `validated_at` (set **only** by a human) |
-| `tasks` | project, parent (subtasks), title, priority, estimate, status, tags (JSON), linked feature |
+| `features` | name, status (`open/proposed/done/rejected`), source (manual/AI), confidence, reasoning, feedback, `validated_at` (set **only** by a human), `deleted_at` (trash) |
+| `tasks` | project, parent (subtasks), title, priority, estimate, status, tags (JSON), linked feature, `deleted_at` (trash) |
 | `sessions` | project, task, kind (focus/break/custom), start/end, duration, note |
-| `log_entries` | dated devlog, linked to a project/task, tags |
+| `log_entries` | dated devlog, linked to a project/task, tags, `deleted_at` (trash) |
 | `git_links` / `git_commits` / `git_sync_state` | linked repos, imported commits (read-only), parsed task/feature, branch |
 | `events` | **append-only event bus**: every mutation writes a row here; the GUI polls `events?since=` for real-time updates |
+| `ai_messages` | persisted AI chat history (kept across sessions, pruned to 500 entries) |
 
 ### Security (summary)
 
 - GUI server **bound to `127.0.0.1` only**, with `Host` **and** `Origin` checks
   (anti-CSRF / anti-DNS-rebinding), `Content-Type: application/json` required on
-  POSTs, 1 MB body cap, `X-Content-Type-Options: nosniff`, generic 500 errors
-  (details are logged server-side only).
+  POSTs, 1 MB body cap, `X-Content-Type-Options: nosniff`, **`X-Frame-Options:
+  DENY` + CSP `frame-ancestors 'none'` on EVERY response** (anti-clickjacking —
+  an `<iframe>` of our own origin would carry the right Host), generic 500
+  errors (details are logged server-side only).
 - Static files served via `is_relative_to` (no directory traversal).
-- `devdash.db` and `config.json` are `chmod 600` (best effort on Windows).
-- Git is **strictly read-only** (`git log` / `git rev-parse`, subprocess in list
-  form, never a shell). The `commit_patterns` regexes run on a truncated subject
-  (anti-ReDoS).
+- `devdash.db` and `config.json` are `chmod 600` (best effort on Windows);
+  `config.json` is written **atomically** (tmp + `os.replace`) under a lock
+  (threaded GUI server: no lost updates, no corrupted file).
+- Temp files (DB snapshot, backup zip, JSON export) are created via
+  `tempfile.mkstemp` (`O_EXCL`): unpredictable name, no symlink race.
+- `git ignore` refuses to write through a symlinked `.gitignore`.
+- AI "cloud" detection resolves DNS (`getaddrinfo` + `ipaddress.is_loopback`):
+  `127.0.0.1.evil.com` is NOT classified as local; unresolvable host = treated
+  as remote (fail-closed).
+- The context sent to the AI model is delimited (`=== DÉBUT/FIN DES DONNÉES
+  PROJET ===`) with an explicit instruction to never follow instructions inside
+  it (anti-prompt-injection; commit messages may come from a hostile clone).
+- Subprocess output (git, pip, folder picker) is decoded as **UTF-8**
+  (`errors="replace"`): no locale-dependent mojibake (Windows cp1252).
+- `sysopen.open_in_explorer` only opens directories (defense in depth).
+- **Update**: `git pull --ff-only` + `pip install -e .` run code from `origin`
+  WITHOUT signature verification — explicit trust model: only update from the
+  official repo over a trusted network.
+- Git is **strictly read-only**: subprocess in list form, never a shell, no
+  shell metacharacters can execute anything; `devdash git run` additionally
+  enforces a subcommand allowlist + **fail-closed argument filtering** (long
+  options refused by prefix incl. `--no-index`/`--force*`/`--git-dir=`, attached
+  short forms `-dfoo`/`-mfoo`, `reflog delete/expire`, and any absolute path),
+  confines to the linked repo (`-C`), and applies a timeout. The
+  `commit_patterns` regexes run on a truncated subject (anti-ReDoS).
+- The project `engine` field is restricted to `[a-z0-9-]{1,40}` (and HTML-escaped
+  in the GUI on top): no stored XSS via a crafted engine name.
 - No API key in the database, events, logs, or displayed errors.
 - Accepted residual risk: `git link` can read the history of any local repo (that
   is its job) — the GUI is protected against cross-site calls, but only link
@@ -324,10 +417,23 @@ without AI, and everything AI-related disappears from both the CLI and the GUI
 Each function can be toggled individually via `ai_feature_flags`.
 
 **From the GUI**: ⚙ Settings tab → pick a provider from the list (local or
-cloud), fill in model / URL / API key / CLI command, tick the features to
-enable, then **Test connection** (sends a plain "OK" prompt only, never project
-context) and **Save**. The entered key is never sent back to the client
-(write-only field: leave empty = keep the stored key).
+cloud), pick a **model from the preset dropdown** (per provider — e.g. Claude
+Opus/Sonnet, GPT-5, Mistral Large…; "Custom…" for anything else), fill in
+URL / API key / CLI command if needed, tick the features to enable, then
+**Test connection** (sends a plain "OK" prompt only, never project context)
+and **Save**. The entered key is never sent back to the client (write-only
+field: leave empty = keep the stored key).
+
+**Providers**: Ollama / local OpenAI-compatible server / local CLI (nothing
+leaves the machine) · Anthropic, Mistral, OpenAI (cloud, key required) ·
+**OpenRouter** (cloud, ONE key for every major model — Claude, GPT, Gemini,
+DeepSeek, Qwen… — pick the model in the dropdown) · custom OpenAI-compatible
+endpoint. The cloud warning banner is shown for any non-loopback provider.
+
+**Context sent to the model** (bounded by `ai_context_max_chars`): active
+project + progress, open tasks, the **subtask tree with rollups**, current
+session, today's minutes + streak, recent devlog, open/proposed features, and
+the git snapshot (branch, recent commits with their linked tasks).
 
 **By hand**: `~/.devdash/config.json` (create it by hand; `chmod 600` applied automatically on
 write):
@@ -391,7 +497,7 @@ The whole interface (CLI **and** GUI) is translated. One option in `config.json`
 - Only **displayed** text is translated. CLI commands, stored values (`todo`,
   `high`, `unity`…), `config.json` keys, and `--json` output stay in English and
   stable for your scripts.
-- The full catalog lives in `devdash/core/i18n.py` (one dict per language, ~350
+- The full catalog lives in `devdash/core/i18n.py` (one dict per language, ~970
   keys): adding a language = adding a dict + an entry in `SUPPORTED_LANGS`.
 
 Safety rules: the AI **never** performs a destructive or write action without
@@ -407,7 +513,7 @@ done`, or `feature approve` on an AI proposal; a rejection is stored as feedback
 devdash/
 ├── core/                 # business logic, stdlib only, testable on its own
 │   ├── db.py             #   SQLite connection, WAL, schema migrations
-│   ├── schema.sql        #   documented schema (v4)
+│   ├── schema.sql        #   documented schema (v10)
 │   ├── models.py         #   dataclasses Project/Task/Feature/Session/...
 │   ├── config.py         #   DEVDASH_HOME + config.json (separate from data)
 │   ├── events.py         #   append-only event bus (real-time)
@@ -422,11 +528,13 @@ devdash/
 │   └── commands/         #   projects/task/session/log/git/feature/ai/stats/demo/gui/status
 ├── gui/                  # native PyWebView window + stdlib 127.0.0.1 HTTP server
 │   ├── server.py         #   API GET/POST routes + background Git watcher
-│   ├── api.py            #   all endpoints (same core functions as the CLI)
+│   ├── api.py            #   Api facade = api_*.py mixins (same core functions as the CLI)
+│   ├── api_common.py     #   ApiError + shared helpers
+│   └── api_<domain>.py   #   endpoints per domain (projects, tasks, git, ai…)
 │   ├── desktop.py        #   run(): native window, or --browser
 │   └── static/           #   index.html / app.js / styles.css (dark theme)
 │                         #   + vendor/chart.umd.min.js (vendored Chart.js, offline)
-└── tests/                # pytest (228+ tests)
+└── tests/                # pytest (460+ tests)
 ```
 
 **Why Python**: rich stdlib (sqlite3, http.server, json, dataclasses), trivial
@@ -445,7 +553,7 @@ than an Electron app.
 
 ```bash
 pip install -e ".[test]"
-PYTHONPATH=. python -m pytest -q   # 228+ tests: core, CLI, sessions, logs, git, GUI,
+PYTHONPATH=. python -m pytest -q   # 460+ tests: core, CLI, sessions, logs, git, GUI,
                                    # features, AI, stats, status, review, security
 ```
 

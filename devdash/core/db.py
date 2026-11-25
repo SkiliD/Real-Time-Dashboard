@@ -1,38 +1,64 @@
-"""sqlite connection, WAL, schema bootstrap + migrations
+"""SQLite connection helper: WAL mode, busy timeout, schema bootstrap + migrations.
 
-If it breaks, the tests will say so.
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 10
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
-def connect(db_path: str | Path) -> sqlite3.Connection:
-    """Open (and create if needed) the database at db_path."""
-    conn = sqlite3.connect(str(db_path), timeout=10.0)
+SQLITE_TIMEOUT_SEC = 10.0  # same value for connect timeout and busy_timeout
+
+
+def connect(db_path: str | Path, *, setup: bool = True) -> sqlite3.Connection:
+    """Open (and create if needed) the database at db_path.
+
+    setup=True (default): one-time-per-file work — WAL journal mode (persistent
+    in the DB header, so pooled connections can skip it) + chmod 600.
+    setup=False: light hot path for pooled per-thread connections — skips the
+    chmod syscall and the WAL pragma (it only takes a write lock briefly)."""
+    conn = sqlite3.connect(str(db_path), timeout=SQLITE_TIMEOUT_SEC)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # busy_timeout: with the threaded GUI server + git watcher + CLI running
     # concurrently, a second writer must WAIT instead of failing immediately
     # with "database is locked" (default timeout is 0).
-    conn.execute("PRAGMA busy_timeout = 10000")
+    conn.execute(f"PRAGMA busy_timeout = {int(SQLITE_TIMEOUT_SEC * 1000)}")
+    if setup:
+        try:
+            # WAL: readers (GUI polling) never block writers (CLI actions).
+            conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.DatabaseError:
+            pass  # e.g. on filesystems without WAL support; plain journal is fine
+        restrict_permissions(Path(db_path))
+    return conn
+
+
+def restrict_permissions(path: Path) -> None:
+    """Best-effort user-only permissions for sensitive files (db, config.json,
+    backups): chmod 0600 on POSIX, plus an icacls ACL reset on Windows where
+    chmod alone does not remove inherited ACLs. Never raises."""
+    import subprocess
+
     try:
-        # WAL: readers (GUI polling) never block writers (CLI actions).
-        conn.execute("PRAGMA journal_mode = WAL")
-    except sqlite3.DatabaseError:
-        pass  # e.g. on filesystems without WAL support; plain journal is fine
-    try:
-        # the DB holds the whole dev history: restrict to the current user
-        # (best effort — chmod is a no-op-ish on Windows, ACLs would be stricter)
-        Path(db_path).chmod(0o600)
+        os.chmod(path, 0o600)
     except OSError:
         pass
-    return conn
+    if os.name == "nt":
+        user = os.environ.get("USERNAME") or ""
+        if user:
+            try:
+                subprocess.run(
+                    ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:F"],
+                    capture_output=True, timeout=10, check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                pass
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -100,6 +126,59 @@ def _migrate(conn: sqlite3.Connection) -> None:
         proj_cols = {r["name"] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         if "languages" not in proj_cols:
             conn.execute("ALTER TABLE projects ADD COLUMN languages TEXT NOT NULL DEFAULT '[]'")
+    if version < 6:
+        # v6: connected project folder (empty = none)
+        proj_cols = {r["name"] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
+        if "path" not in proj_cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN path TEXT NOT NULL DEFAULT ''")
+    if version < 7:
+        # v7: hot-path indexes — running session lookup (partial) + commit
+        # ordering/counting by date (committed_at is normalized UTC ISO, so a
+        # plain lexicographic index is chronologically correct)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_running ON sessions(id) WHERE ended_at IS NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_commits_repo_date ON git_commits(repo_path, committed_at)"
+        )
+    if version < 8:
+        # v8: persisted AI chat history (per project)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ai_messages ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, "
+            "role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT, created_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_messages_project ON ai_messages(project_id, id)"
+        )
+    if version < 9:
+        # v9: soft delete (corbeille) for tasks / log_entries / features
+        for table in ("tasks", "log_entries", "features"):
+            cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "deleted_at" not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
+    if version < 10:
+        # v10: poll-path indexes. The GUI polls /api/logs and /api/sessions every
+        # 1.5 s with ORDER BY created_at/started_at DESC LIMIT n per project —
+        # without these the sort needs a full table scan + temp b-tree each poll.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_log_project_created "
+            "ON log_entries(project_id, created_at DESC, id DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_project_started "
+            "ON sessions(project_id, started_at DESC, id DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_project_task "
+            "ON sessions(project_id, task_id)"
+        )
+        # global commit ordering (project=all view) and done-task counting
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_commits_date ON git_commits(committed_at DESC)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_completed "
+            "ON tasks(completed_at) WHERE status = 'done' AND completed_at IS NOT NULL"
+        )
     # no commit here: init_db wraps _migrate in a single transaction
 
 

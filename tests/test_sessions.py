@@ -80,17 +80,30 @@ def test_start_without_active_project(conn):
         sessions.start(conn)
 
 
+def _anchor(conn, session_id: int, days_ago: int, minutes: float, rank: int = 0) -> None:
+    """Pin a stopped session to the local day `days_ago` (start of day + rank s)
+    with an explicit duration — immune to midnight boundary flakes."""
+    from devdash.core.models import day_start_utc
+
+    start = datetime.fromisoformat(day_start_utc(days_ago)) + timedelta(minutes=1, seconds=rank)
+    conn.execute(
+        "UPDATE sessions SET started_at = ?, duration_min = ? WHERE id = ?",
+        (start.isoformat(timespec="seconds"), minutes, session_id),
+    )
+    conn.commit()
+
+
 def test_list_filters_and_totals(conn, project):
     s1 = sessions.start(conn)
-    _age(conn, s1.id, 30)
     sessions.stop(conn, s1.id, note="a")
+    _anchor(conn, s1.id, 0, 30, rank=1)
     s2 = sessions.start(conn)
-    _age(conn, s2.id, 10)
     sessions.stop(conn, s2.id, note="b")
+    _anchor(conn, s2.id, 0, 10, rank=2)
     # an old session from "last week"
     s3 = sessions.start(conn)
-    _age(conn, s3.id, 60 * 24 * 10)
     sessions.stop(conn, s3.id, note="old")
+    _anchor(conn, s3.id, 10, 60 * 24 * 10, rank=3)
 
     assert len(sessions.list(conn, today=True)) == 2      # s3 is 10 days old
     assert len(sessions.list(conn, week=True)) == 2

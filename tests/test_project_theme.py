@@ -37,11 +37,29 @@ def test_schema_v5_adds_languages_and_migrates_v4(home):
     c.close()
     # reopen: migration must add the column back and keep the row
     c = conn(home)
-    assert db.schema_version(c) == 5
+    assert db.schema_version(c) == db.SCHEMA_VERSION
     cols = {r["name"] for r in c.execute("PRAGMA table_info(projects)")}
-    assert "languages" in cols
+    assert "languages" in cols and "path" in cols
     p2 = projects.get(c, p.id)
-    assert p2 is not None and p2.languages == []
+    assert p2 is not None and p2.languages == [] and p2.path == ""
+    c.close()
+
+
+def test_schema_v6_adds_path_and_migrates_v5(home):
+    # simulate a v5 database: drop the path column, stamp version 5
+    c = conn(home)
+    p = projects.create(c, "Old", engine="unity", color="#2563eb")
+    c.execute("ALTER TABLE projects DROP COLUMN path")
+    c.execute("UPDATE meta SET value = '5' WHERE key = 'schema_version'")
+    c.commit()
+    c.close()
+    # reopen: migration must add the column back (default '') and keep the row
+    c = conn(home)
+    assert db.schema_version(c) == db.SCHEMA_VERSION
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(projects)")}
+    assert "path" in cols
+    p2 = projects.get(c, p.id)
+    assert p2 is not None and p2.path == "" and p2.languages == []
     c.close()
 
 

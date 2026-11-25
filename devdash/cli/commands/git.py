@@ -6,8 +6,10 @@ from rich.table import Table
 
 from devdash.core import gitwatch
 from devdash.core.i18n import tr, tr_cols
+
+STATUS_MSG_SNIPPET = 60  # commit message chars shown in `git status`
 from ..deps import get_conn, guard, resolve_project
-from ..output import emit
+from ..output import emit, fmt_ts
 
 app = typer.Typer(help=tr("group.git.help"))
 console = Console()
@@ -102,9 +104,76 @@ def _render_commits(rows) -> None:
         table.add_column(col)
     for c in rows:
         link = f"#{c.parsed_task_id}" if c.parsed_task_id else (f"feat:{c.parsed_feature}" if c.parsed_feature else "[dim]—[/]")
-        table.add_row(c.short, c.committed_at[:16].replace("T", " "), c.author,
-                      c.message if len(c.message) <= 60 else c.message[:57] + "…", link)
+        table.add_row(c.short, fmt_ts(c.committed_at), c.author,
+                      c.message if len(c.message) <= STATUS_MSG_SNIPPET else c.message[:STATUS_MSG_SNIPPET - 3] + "…", link)
     console.print(table)
+
+
+@app.command("run", help=tr("git.run.help"))
+def run_cmd(
+    ctx: typer.Context,
+    cmd: str = typer.Argument(..., help=tr("opt.git_cmd")),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """Run a READ-ONLY git command in the linked repo (allowlist: log, diff, status...)."""
+    conn = get_conn(ctx)
+    proj = resolve_project(conn, project)
+    repo = gitwatch.get_link(conn, proj.id)
+    if not repo:
+        raise typer.BadParameter(tr("git.no_repo", slug=proj.slug))
+    r = gitwatch.run_readonly(repo, cmd)
+
+    def render() -> None:
+        if r["ok"]:
+            console.print(r["stdout"] or r["stderr"])
+        else:
+            console.print(f"[red]{r['stderr']}[/red]")
+
+    emit(ctx, r, render)
+
+
+def _remote_read_cmd(ctx, cmdline: str, project: str | None) -> None:
+    conn = get_conn(ctx)
+    proj = resolve_project(conn, project)
+    repo = gitwatch.get_link(conn, proj.id)
+    if not repo:
+        raise typer.BadParameter(tr("git.no_repo", slug=proj.slug))
+    r = gitwatch.run_remote_read(repo, cmdline)
+
+    def render() -> None:
+        if r["ok"]:
+            console.print(r["stdout"] or r["stderr"] or "[green]ok[/]")
+        else:
+            console.print(f"[red]{r['stderr']}[/red]")
+
+    emit(ctx, r, render)
+
+
+@app.command("fetch", help=tr("git.fetch.help"))
+def fetch_cmd(
+    ctx: typer.Context,
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """Update remote-tracking refs of the linked repo (working tree untouched)."""
+    _remote_read_cmd(ctx, "fetch", project)
+
+
+@app.command("pull", help=tr("git.pull.help"))
+def pull_cmd(
+    ctx: typer.Context,
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """Fast-forward the linked repo only (--ff-only; other update modes refused)."""
+    _remote_read_cmd(ctx, "pull --ff-only", project)
+
+
+@app.command("remote", help=tr("git.remote.help"))
+def remote_cmd(
+    ctx: typer.Context,
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """List the configured remotes of the linked repo (remote -v, read-only)."""
+    _remote_read_cmd(ctx, "remote -v", project)
 
 
 @app.command("log", help=tr("git.log.help"))
@@ -146,7 +215,7 @@ def status_cmd(
                today=data.get("commits_today"), cached=data.get("cached_commits"))
         )
         if last:
-            console.print(tr("git.status.last", short=last["short"], message=last["message"][:60],
-                             date=last["committed_at"][:16]))
+            console.print(tr("git.status.last", short=last["short"], message=last["message"][:STATUS_MSG_SNIPPET],
+                             date=fmt_ts(last["committed_at"])))
 
     emit(ctx, data, render)

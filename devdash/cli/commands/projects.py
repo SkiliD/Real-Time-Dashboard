@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -9,13 +11,13 @@ from rich.table import Table
 from devdash.core import projects as core
 from devdash.core import tasks as core_tasks
 from devdash.core.i18n import tr, tr_cols
-from ..deps import get_conn, guard, read_text_file
-from ..output import emit
+from ..deps import get_conn, guard, read_text_file, resolve_project
+from ..output import emit, fmt_date
 
 app = typer.Typer(help=tr("group.projects.help"))
 console = Console()
 
-_ENGINES = ["unity", "unreal", "godot", "web", "other"]
+_ENGINES = list(core.SUGGESTED_ENGINES)  # single source of truth: core.projects
 _STATUSES = list(core.VALID_STATUSES)
 
 
@@ -47,7 +49,7 @@ def list_projects(
             style = "dim" if p.archived else ""
             table.add_row(
                 marker, p.slug, p.name, p.engine, p.status, str(n_open),
-                p.created_at[:10], style=style,
+                fmt_date(p.created_at), style=style,
             )
         console.print(table)
         if active is None:
@@ -63,11 +65,11 @@ def create_project(
     description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
     desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
     engine: str = typer.Option("other", "--engine", "-e",
-                                help=tr("opt.engine", list=", ".join(_ENGINES))),
+                                help=tr("opt.engine", items=", ".join(_ENGINES))),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
     lang: list[str] = typer.Option([], "--lang", "-l", help=tr("opt.langs")),
     status: str = typer.Option("idea", "--status", "-s",
-                                help=tr("opt.status", list=", ".join(_STATUSES))),
+                                help=tr("opt.status", items=", ".join(_STATUSES))),
     set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
 ) -> None:
     """Create a new project."""
@@ -89,11 +91,11 @@ def connect_project(
     name: str = typer.Option("", "--name", "-n", help=tr("opt.name")),
     description: str = typer.Option("", "--description", "-d", help=tr("opt.description")),
     engine: str = typer.Option("", "--engine", "-e",
-                                help=tr("opt.engine", list=", ".join(_ENGINES)) + " " + tr("opt.engine_auto")),
+                                help=tr("opt.engine", items=", ".join(_ENGINES)) + " " + tr("opt.engine_auto")),
     color: str = typer.Option("#8a8f98", "--color", "-c", help=tr("opt.color")),
     lang: list[str] = typer.Option([], "--lang", "-l", help=tr("opt.langs")),
     status: str = typer.Option("idea", "--status", "-s",
-                                help=tr("opt.status", list=", ".join(_STATUSES))),
+                                help=tr("opt.status", items=", ".join(_STATUSES))),
     set_active: bool = typer.Option(False, "--set-active", help=tr("opt.set_active")),
     no_git: bool = typer.Option(False, "--no-git", help=tr("opt.no_git")),
 ) -> None:
@@ -108,10 +110,10 @@ def connect_project(
         raise typer.BadParameter(tr("err.not_a_dir", path=path))
     eng = (engine or info["engine"] or "other").lower()
     if eng not in _ENGINES:
-        raise typer.BadParameter(tr("err.bad_engine", engine=eng, list=", ".join(_ENGINES)))
+        raise typer.BadParameter(tr("err.bad_engine", engine=eng, items=", ".join(_ENGINES)))
     project = guard(core.create, conn, name or info["name"] or info["path"],
                     description=description, engine=eng, color=color, status=status,
-                    languages=lang)
+                    languages=lang, path=info["path"])
     if set_active:
         guard(core.set_active, conn, project.id)
     git_root = None
@@ -169,6 +171,29 @@ def show_project(
     emit(ctx, data, render)
 
 
+@app.command("open", help=tr("projects.open.help"))
+def open_project(
+    ctx: typer.Context,
+    ref: str | None = typer.Argument(None, help=tr("opt.project_default")),
+) -> None:
+    """Open the project's CONNECTED folder in the OS file explorer (explicit
+    user action; only the server-stored path is ever opened, argv, no shell)."""
+    from devdash.core import sysopen
+
+    conn = get_conn(ctx)
+    project = resolve_project(conn, ref)
+    if not project.path:
+        raise typer.BadParameter(tr("err.no_project_path", slug=project.slug))
+    if not Path(project.path).is_dir():
+        raise typer.BadParameter(tr("err.project_path_gone", path=project.path))
+    try:
+        sysopen.open_in_explorer(project.path)
+    except OSError as e:
+        raise typer.BadParameter(str(e))
+    emit(ctx, {"project": project.slug, "opened": project.path},
+         lambda: console.print(tr("projects.opened", path=project.path)))
+
+
 @app.command("update", help=tr("projects.update.help"))
 def update_project(
     ctx: typer.Context,
@@ -176,11 +201,11 @@ def update_project(
     name: str | None = typer.Option(None, "--name", help=tr("opt.name")),
     description: str | None = typer.Option(None, "--description", "-d", help=tr("opt.description")),
     desc_file: str | None = typer.Option(None, "--desc-file", help=tr("opt.desc_file")),
-    engine: str | None = typer.Option(None, "--engine", "-e", help=tr("opt.engine", list=", ".join(_ENGINES))),
+    engine: str | None = typer.Option(None, "--engine", "-e", help=tr("opt.engine", items=", ".join(_ENGINES))),
     color: str | None = typer.Option(None, "--color", "-c", help=tr("opt.color")),
     lang: list[str] | None = typer.Option(None, "--lang", "-l", help=tr("opt.langs")),
     status: str | None = typer.Option(None, "--status", "-s",
-                                       help=tr("opt.status", list=", ".join(_STATUSES))),
+                                       help=tr("opt.status", items=", ".join(_STATUSES))),
 ) -> None:
     """Update project fields (e.g. --status beta)."""
     conn = get_conn(ctx)

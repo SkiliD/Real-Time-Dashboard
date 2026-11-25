@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="360" viewBox="0 0 720 360" font-family="Segoe UI, Arial, sans-serif">
+  <rect width="720" height="360" rx="10" fill="#0f1115"/>
+  <rect x="12" y="14" width="70" height="22" rx="11" fill="#1f232e" stroke="#2563eb"/><text x="24" y="30" font-size="11" fill="#60a5fa">⎇ main</text>
+  <rect x="92" y="14" width="90" height="22" rx="6" fill="#2563eb"/><text x="104" y="30" font-size="11" fill="#fff">⇩ Fetch</text>
+  <rect x="190" y="14" width="110" height="22" rx="6" fill="#1f232e" stroke="#3a3f4b"/><text x="202" y="30" font-size="11" fill="#e8e8ec">⇩ Pull (ff-only)</text>
+  <rect x="12" y="48" width="696" height="120" rx="8" fill="#171a21"/>
+  <rect x="24" y="60" width="110" height="10" rx="5" fill="#9aa3b2"/>
+  <rect x="24" y="80" width="14" height="14" rx="3" fill="#2563eb"/><text x="27" y="91" font-size="10" fill="#fff">✓</text>
+  <rect x="46" y="83" width="180" height="9" rx="4" fill="#e8e8ec"/><text x="640" y="91" font-size="10" fill="#3fb27f">+12</text><text x="664" y="91" font-size="10" fill="#e05d5d">−3</text>
+  <rect x="24" y="102" width="14" height="14" rx="3" fill="#0f1115" stroke="#3a3f4b"/>
+  <rect x="46" y="105" width="150" height="9" rx="4" fill="#e8e8ec"/><text x="640" y="113" font-size="10" fill="#3fb27f">+40</text>
+  <rect x="24" y="128" width="14" height="14" rx="3" fill="#0f1115" stroke="#3a3f4b"/>
+  <rect x="46" y="131" width="200" height="9" rx="4" fill="#e8e8ec"/>
+  <rect x="12" y="180" width="696" height="168" rx="8" fill="#171a21"/>
+  <circle cx="34" cy="200" r="5" fill="#2563eb"/><rect x="48" y="194" width="60" height="9" rx="4" fill="#f59e0b"/><rect x="116" y="194" width="300" height="9" rx="4" fill="#e8e8ec"/>
+  <circle cx="34" cy="226" r="5" fill="#2563eb"/><rect x="48" y="220" width="60" height="9" rx="4" fill="#7aa2f7"/><rect x="116" y="220" width="260" height="9" rx="4" fill="#9aa3b2"/>
+  <circle cx="34" cy="252" r="5" fill="#3a3f4b"/><rect x="48" y="246" width="60" height="9" rx="4" fill="#3fb27f"/><rect x="116" y="246" width="320" height="9" rx="4" fill="#9aa3b2"/>
+  <rect x="24" y="276" width="672" height="56" rx="6" fill="#0f1115"/>
+  <text x="36" y="296" font-size="10" fill="#3fb27f">+ added line</text>
+  <text x="36" y="312" font-size="10" fill="#e05d5d">− removed line</text>
+</svg>

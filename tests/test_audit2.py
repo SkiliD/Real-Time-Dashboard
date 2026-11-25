@@ -189,11 +189,11 @@ def test_task_delete_cascades_subtasks(home):
         t = tasks.add(c, p.id, "parent")
         sub = tasks.add(c, p.id, "child")
         tasks.update(c, sub.id, parent_id=t.id)
-        tasks.delete(c, t.id)
+        tasks.delete(c, t.id, permanent=True)  # hard delete: FK cascade
         assert tasks.get(c, t.id) is None
         assert tasks.get(c, sub.id) is None  # ON DELETE CASCADE
         with pytest.raises(KeyError):
-            tasks.delete(c, t.id)
+            tasks.delete(c, t.id, permanent=True)
 
 
 def test_cli_task_delete(home):
@@ -213,8 +213,9 @@ def test_gui_task_delete_wiring():
     srv = (ROOT / "devdash" / "gui" / "server.py").read_text(encoding="utf-8")
     assert 'id="btn-delete-task"' in html
     assert '$("#btn-delete-task")' in js and "/api/tasks/delete" in js
-    assert '"/api/tasks/delete"' in srv and "def tasks_delete" in (
-        ROOT / "devdash" / "gui" / "api.py").read_text(encoding="utf-8")
+    api_all = "\n".join(f.read_text(encoding="utf-8")
+                        for f in sorted((ROOT / "devdash" / "gui").glob("api*.py")))
+    assert '"/api/tasks/delete"' in srv and "def tasks_delete" in api_all
     assert Api._int("5", "id") == 5  # endpoint parses id through the same helper
 
 

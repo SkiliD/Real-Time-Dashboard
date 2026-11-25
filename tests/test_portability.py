@@ -27,7 +27,9 @@ def test_no_shell_true_in_subprocess_calls():
 
 
 def test_startfile_is_guarded():
-    api = (PKG / "gui" / "api.py").read_text(encoding="utf-8")
+    # the REST layer is split into gui/api*.py mixins — scan them all
+    api = "\n".join((PKG / "gui").glob("api*.py") and
+                    [f.read_text(encoding="utf-8") for f in sorted((PKG / "gui").glob("api*.py"))])
     assert 'sys.platform == "win32"' in api and 'hasattr(os, "startfile")' in api
 
 

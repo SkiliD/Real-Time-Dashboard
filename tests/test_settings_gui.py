@@ -173,3 +173,147 @@ def test_http_settings_and_backup_flow(home):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_lang_switch_roundtrip_over_http(home):
+    """Regression: switching the UI language must take effect on the next
+    GET /api/i18n (the GUI reloads the catalog right after saving settings)."""
+    srv = make_server(port=0, home=home)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        def get(p):
+            return json.loads(urllib.request.urlopen(base + p).read())
+        assert get("/api/i18n")["lang"] == "fr"
+        req = urllib.request.Request(
+            base + "/api/settings",
+            data=json.dumps({"lang": "en"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req).read()
+        d = get("/api/i18n")
+        assert d["lang"] == "en"
+        assert d["messages"]["gui.tab.tasks"] == "Tasks"  # real EN catalog, not the FR fallback
+        assert i18n.get_lang(home) == "en"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_save_button_exists_outside_collapsed_ai_card():
+    """Regression: the only save button used to live inside the AI settings card,
+    which is collapsed when the assistant is disabled -> with AI off there was no
+    way to save (e.g. the language stayed stuck). A save button must exist in the
+    General card, OUTSIDE the #ai-config-body wrapper."""
+    html = (Path(__file__).parent.parent / "devdash" / "gui" / "static" / "index.html").read_text(encoding="utf-8")
+    ai_body = html.find('id="ai-config-body"')
+    assert ai_body != -1, "ai-config-body wrapper missing"
+    save_general = html.find('id="btn-general-save"')
+    assert save_general != -1, "General card has no save button"
+    assert save_general < ai_body, "btn-general-save must be OUTSIDE (before) the collapsed AI section"
+
+
+def test_data_and_update_cards_in_grid_next_to_general():
+    """Settings: Général / Données / Mise à jour / IA are four PLAIN grid cards
+    (no span-full) so the auto-fit grid lays them side by side — Données and
+    Mise à jour sit next to Général, still as two distinct cards."""
+    static = Path(__file__).parent.parent / "devdash" / "gui" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    css = (static / "styles.css").read_text(encoding="utf-8")
+    assert "span-full" not in html, "no settings card may be full-width anymore"
+    assert "span-full" not in css, "the span-full rule must be gone from the CSS"
+    assert "repeat(auto-fit" in css, "settings grid must be auto-fit so cards sit side by side"
+    opens = []
+    for key in ('data-i18n="gui.set.general"', 'data-i18n="gui.set.data"',
+                'data-i18n="gui.upd.title"', 'data-i18n="gui.set.title"'):
+        h3 = html.find(key)
+        assert h3 != -1, key
+        card_open = html.rfind('<div class="settings-card', 0, h3)
+        assert card_open != -1, key
+        card_tag = html[card_open:html.find(">", card_open) + 1]
+        assert card_tag == '<div class="settings-card">', f"{key}: plain grid card, got {card_tag}"
+        opens.append(card_open)
+    # four separate cards in DOM order: Général, Données, Mise à jour, IA
+    assert len(set(opens)) == 4 and opens == sorted(opens)
+
+
+def test_update_animations_are_wired_and_reduced_motion_safe():
+    """Update-check animations: spinner/nudge/progress exist, are purposeful
+    (finite nudge, loading states) and fully disabled by prefers-reduced-motion."""
+    static = Path(__file__).parent.parent / "devdash" / "gui" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    css = (static / "styles.css").read_text(encoding="utf-8")
+    js = (static / "app.js").read_text(encoding="utf-8")
+    # CSS pieces
+    for piece in ("@keyframes spin", "@keyframes status-in", "@keyframes nudge",
+                  ".btn .spin", ".btn.loading", ".status-line.pop", ".btn.nudge",
+                  ".upd-progress.on", "prefers-reduced-motion"):
+        assert piece in css, f"missing CSS: {piece}"
+    assert "animation: nudge .28s ease-in-out 3" in css  # finite, not an endless loop
+    # HTML hooks
+    assert 'id="upd-progress"' in html and 'id="upd-status" class="dim status-line"' in html
+    assert 'id="git-cmd-status" class="dim small status-line"' in html
+    # JS wiring
+    for fn in ("setBtnBusy", "popStatus"):
+        assert f"function {fn}" in js, fn
+    for caller in ("checkUpdate", "runUpdate", "gitRun", "gitDiffSelection"):
+        body = js[js.index(f"function {caller}"):]
+        body = body[:body.index("\nfunction ") if "\nfunction " in body else len(body)]
+        assert "setBtnBusy" in body, f"{caller} must show a busy spinner"
+    assert 'gui.upd.checking' in js
+
+
+def test_update_button_only_shown_when_update_detected():
+    """'Mettre à jour maintenant' must be hidden by default and only revealed
+    when an update was actually detected (check button or last fetch)."""
+    static = Path(__file__).parent.parent / "devdash" / "gui" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "app.js").read_text(encoding="utf-8")
+    css = (static / "styles.css").read_text(encoding="utf-8")
+    # hidden in the markup
+    assert '<button id="btn-upd-run" class="btn btn-primary hidden"' in html
+    # one sync function driven by state.upd.update_available
+    assert "function syncUpdRunBtn()" in js
+    assert "state.upd.update_available" in js
+    for caller in ("loadUpdateStatus", "checkUpdate", "runUpdate"):
+        body = js[js.index(f"function {caller}" if not caller.startswith("load") else f"async function {caller}"):]
+        nxt = body.find("\nfunction ", 10)
+        nxt2 = body.find("\nasync function ", 10)
+        end = min([x for x in (nxt, nxt2) if x > 0] or [len(body)])
+        assert "syncUpdRunBtn" in body[:end], f"{caller} must call syncUpdRunBtn"
+    # reveal animation available for the button
+    assert ".btn.pop" in css
+
+
+def test_theme_auto_is_supported_everywhere():
+    """Theme 'auto' (follow the OS) must be accepted by the config, offered in
+    the settings select, resolved in the pre-paint inline script, and handled
+    by applyTheme (incl. live OS changes)."""
+    root = Path(__file__).resolve().parents[1]
+    from devdash.core import config as cfgmod, i18n
+    html = (root / "devdash/gui/static/index.html").read_text(encoding="utf-8")
+    js = (root / "devdash/gui/static/app.js").read_text(encoding="utf-8")
+    cfg_py = (root / "devdash/core/config.py").read_text(encoding="utf-8")
+    assert '("dark", "light", "auto")' in cfg_py
+    assert 'theme: str = "auto"' in cfg_py
+    assert '<option value="auto" data-i18n="gui.set.theme.auto">' in html
+    assert "gui.set.theme.auto" in i18n.FR and "gui.set.theme.auto" in i18n.EN
+    inline = html[html.index("<script>"):html.index("</script>")]
+    assert "prefers-color-scheme" in inline and '"auto"' in inline
+    assert "function resolveTheme" in js and "prefers-color-scheme" in js
+    assert "onSysThemeChange" in js and 'localStorage.setItem("devdash-theme", raw)' in js
+    import tempfile
+    import pytest
+    with tempfile.TemporaryDirectory() as d:
+        assert cfgmod.load_config(Path(d)).theme == "auto"
+        cfgmod.update_config(Path(d), lambda c: setattr(c, "theme", "light"))
+        assert cfgmod.load_config(Path(d)).theme == "light"
+        cfgmod.update_config(Path(d), lambda c: setattr(c, "theme", "auto"))
+        assert cfgmod.load_config(Path(d)).theme == "auto"
+        # the validator used by the settings endpoint accepts auto, refuses junk
+        cfg = cfgmod.Config()
+        cfgmod.apply_general_settings(cfg, {"theme": "auto"})
+        assert cfg.theme == "auto"
+        with pytest.raises(ValueError):
+            cfgmod.apply_general_settings(cfgmod.Config(), {"theme": "neon"})

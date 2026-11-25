@@ -13,7 +13,7 @@
   --green: #3fb27f;
   --red: #e5534b;
   --yellow: #d9a13b;
-  --radius: 8px;
+  --radius: 10px; /* softly rounded cards/panels (window corners rounded via DWM attr 33) */
   --font: "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
   color-scheme: dark; /* native controls (scrollbars, spinners, selects, color input) render dark */
@@ -24,7 +24,32 @@ body {
   background: var(--bg); color: var(--text);
   font-family: var(--font); font-size: 14px;
 }
-#app { display: flex; height: 100vh; }
+#app { display: flex; height: 100vh; height: 100dvh; /* dvh: correct on mobile browsers with dynamic toolbars */ }
+
+/* custom title bar — native frameless window only (hidden in browser mode) */
+#titlebar { display: none; }
+html.native #titlebar {
+  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 4px 0 12px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag; app-region: drag; /* the bar itself is the window drag region */
+  user-select: none; flex-shrink: 0;
+}
+html.native #app { height: calc(100vh - 34px); height: calc(100dvh - 34px); }
+.tb-brand { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.tb-spacer { flex: 1; }
+.tb-btn {
+  -webkit-app-region: no-drag; app-region: no-drag; width: 44px; height: 26px; border: none; background: none;
+  color: var(--text-dim); font-size: 13px; line-height: 1; cursor: pointer; border-radius: 6px;
+}
+.tb-btn:hover { background: var(--panel-2); color: var(--text); }
+.tb-btn.tb-close:hover { background: var(--red); color: #fff; }
+
+/* build log (settings > exécutable) */
+.build-log {
+  max-height: 180px; overflow: auto; margin: 8px 0 0;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px; white-space: pre-wrap;
+}
 
 /* sidebar */
 #sidebar {
@@ -50,7 +75,7 @@ body {
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #project-header {
   padding: 14px 20px; border-bottom: 2px solid var(--proj); /* themed by the active project */
-  display: flex; align-items: baseline; gap: 12px;
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; row-gap: 4px;
 }
 #project-header .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 #project-header h1 { font-size: 18px; margin: 0; }
@@ -61,11 +86,16 @@ body {
   display: flex; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--border);
   align-items: center; flex-wrap: wrap;
 }
-#task-toolbar input[type="text"], #task-toolbar select, #task-toolbar input[type="number"] {
+#task-toolbar input[type="text"], #task-toolbar select, #task-toolbar input[type="number"],
+#task-toolbar .tool-toggle {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 7px 10px; font-family: var(--font); font-size: 13px;
 }
-#new-task-title { flex: 1; min-width: 220px; }
+/* toggle button styled like the toolbar selects (e.g. 🗑 Corbeille), not like a .btn */
+#task-toolbar .tool-toggle { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+#task-toolbar .tool-toggle:hover { border-color: var(--accent); }
+#task-toolbar .tool-toggle.btn-active { border-color: var(--accent); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent); }
+#new-task-title { flex: 1; min-width: 140px; }
 #new-task-est { width: 90px; }
 .spacer { flex: 1; }
 
@@ -75,6 +105,8 @@ body {
   border-radius: 6px; padding: 7px 14px; cursor: pointer; font-size: 13px;
 }
 .btn:hover { border-color: var(--accent); }
+/* toggle-button "on" state (e.g. the trash view button in the task toolbar) */
+.btn.btn-active { border-color: var(--accent); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-block { width: 100%; }
 .btn-sm { padding: 3px 8px; font-size: 12px; border-radius: 5px; }
@@ -83,11 +115,26 @@ body {
 #kanban { flex: 1; display: flex; gap: 12px; padding: 16px 20px; overflow: auto; }
 .col { flex: 1; min-width: 240px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; }
 .col h3 { margin: 2px 4px 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-dim); }
-.col .count { opacity: .6; font-weight: 400; }
+.col .count { opacity: .9; font-weight: 600; } /* column counter: scannable at a glance */
 .cards { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+/* long projects: a collapsed column shows only its header + count */
+#kanban .col h3 { cursor: pointer; user-select: none; }
+#kanban .col h3:hover { color: var(--accent-text); }
+#kanban .col.col-collapsed .cards { display: none; }
+#kanban .col.col-collapsed { min-width: 64px; }
+#kanban .col.col-collapsed h3 .count { display: inline; }
+/* "voir plus" footer when a column exceeds its render cap */
+.col-more { width: 100%; margin-top: 2px; opacity: .85; }
 .card {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
   padding: 10px 12px;
+}
+/* task with a running session: accent ring pulse + ▶ marker (killed by the reduced-motion rule) */
+.card.running { border-color: var(--accent); animation: runpulse 1.6s ease-in-out infinite; }
+.card.running .t-text::before { content: "▶"; color: var(--accent); margin-right: 5px; font-size: .8em; }
+@keyframes runpulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--accent); }
+  50% { box-shadow: 0 0 0 4px transparent; }
 }
 .card .title { font-weight: 600; margin-bottom: 6px; }
 .card .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -110,8 +157,52 @@ body {
 .col-cancelled { opacity: .8; }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } /* keyboard focus on cards */
 
-/* long descriptions: multiline textareas that grow while typing */
-textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-height: 1.45; }
+/* ----- subtask stacking (Notion/Trello-style) ----- */
+.card .title { display: flex; align-items: center; gap: 4px; }
+.card .title .t-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sub-toggle { padding: 0 4px; font-size: 11px; line-height: 1.4; }
+.card.drop-sub { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); } /* drop a card here => subtask */
+.sub-progress { height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; margin-bottom: 6px; }
+.sub-progress .bar { height: 100%; background: var(--accent); transition: width .25s ease; }
+.sub-stack {
+  margin: 2px 0 6px; padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  background: var(--panel-2); border: 1px dashed var(--border); border-radius: 6px;
+}
+.sub-card {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 5px; cursor: pointer;
+}
+.sub-card:hover { border-color: var(--accent); }
+.sub-card .sub-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-card.st-done { opacity: .55; }
+.sub-card.st-done .sub-title { text-decoration: line-through; }
+.sub-card.st-in_progress { border-left: 3px solid var(--yellow); }
+.sub-card .sub-done { margin-left: auto; }
+.sub-add-row { display: flex; align-items: center; gap: 6px; }
+.sub-add-row .sub-add-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 5px; padding: 4px 8px; font-size: 12px; font-family: var(--mono);
+}
+.sub-add-row .sub-add-input:focus { border-color: var(--accent); outline: none; }
+.sub-all-done { width: 100%; }
+.card.is-subtask { border-left: 3px solid var(--border); }
+
+/* long descriptions: multiline textareas that grow while typing (JS caps at 400px).
+   Styled exactly like the text inputs so they don't look native/austere. */
+textarea.desc-input {
+  width: 100%; resize: vertical; min-height: 64px; line-height: 1.5;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 9px 11px; font: inherit; font-size: 13px;
+  caret-color: var(--accent-text);
+}
+textarea.desc-input:hover { border-color: var(--text-dim); }
+textarea.desc-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
+textarea.desc-input::placeholder { color: var(--text-dim); opacity: .55; font-style: italic; }
+/* custom resize grip instead of the native light one */
+textarea.desc-input::-webkit-resizer {
+  background: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M11 1L1 11M11 6L6 11' stroke='%239aa3b2' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat bottom 4px right 4px;
+  border-bottom-right-radius: 6px;
+}
 #log-content.desc-input { min-height: 38px; }
 
 /* modal overlays: ALL modal containers share the fixed centered overlay
@@ -123,19 +214,21 @@ textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-heig
 #modal.hidden, #modal-edit.hidden, #modal-task.hidden, #modal-help.hidden, #modal-feat.hidden { display: none; }
 .modal-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  padding: 20px; width: 380px; max-width: 92vw; max-height: 90vh; overflow-y: auto;
+  padding: 20px; width: 440px; max-width: 92vw; max-height: 90vh; overflow-y: auto;
   display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
 }
 .modal-card h3 { margin: 0 0 6px; }
 .modal-card label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
-.modal-card input, .modal-card select {
+.modal-card input, .modal-card select, .modal-card textarea {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-  border-radius: 6px; padding: 7px 10px;
+  border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 13px;
 }
+.modal-card input:hover, .modal-card textarea:hover { border-color: var(--text-dim); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
 /* session panel */
-#project-header-left { display: flex; align-items: baseline; gap: 12px; }
+#project-header-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; row-gap: 4px; }
 #project-header-left .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 #project-header-left h1 { font-size: 18px; margin: 0; }
 #project-header-left .sub { color: var(--text-dim); font-size: 12px; }
@@ -159,7 +252,7 @@ textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-heig
 #session-list li { font-size: 12px; color: var(--text); }
 
 /* tabs */
-#tabs { display: flex; gap: 4px; padding: 8px 20px 0; border-bottom: 1px solid var(--border); }
+#tabs { display: flex; gap: 4px; padding: 8px 20px 0; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; } /* narrow window: tabs scroll instead of being crushed */
 .tab {
   position: relative; background: none; border: none; color: var(--text-dim);
   padding: 8px 14px; cursor: pointer; font-size: 13px; font-family: var(--font);
@@ -203,6 +296,55 @@ textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-heig
   border-radius: 6px; padding: 7px 10px; font-size: 13px; flex: 1; min-width: 240px; font-family: var(--mono);
 }
 #git-status { padding: 10px 20px; font-size: 12px; border-bottom: 1px solid var(--border); }
+/* GitHub-Desktop-style "Changes" panel: changed files with status badge + +/- */
+#git-changes { border-bottom: 1px solid var(--border); background: var(--panel); }
+.git-changes-head { display: flex; align-items: center; gap: 8px; padding: 8px 20px 4px; font-size: 12px; font-weight: 600; }
+/* linked-task banner: uncommitted changes tied to a ticket => completion offer */
+#git-linked-task {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 4px 12px 6px; padding: 7px 10px; font-size: 12.5px;
+  background: var(--panel-2); border: 1px solid var(--accent); border-radius: 6px;
+}
+#git-linked-task.hidden { display: none; }
+#git-linked-task .ok { color: var(--green); }
+#git-linked-task .btn-danger-armed { border-color: var(--red); color: #ffb4b4; }
+#git-changes-list { list-style: none; margin: 0; padding: 4px 12px 10px; max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+#git-changes-list li {
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px;
+  font-family: var(--mono); font-size: 12px; cursor: pointer; border: 1px solid transparent;
+}
+#git-changes-list li:hover { background: var(--panel-2); border-color: var(--border); }
+#git-changes-list li.sel { background: var(--panel-2); border-color: var(--accent); }
+#git-changes-list .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#git-changes-list .diffstat { font-size: 11px; white-space: nowrap; }
+#git-changes-list .diffstat .add { color: var(--green); }
+#git-changes-list .diffstat .del { color: var(--red); }
+.git-changes-head .sel-ctl { display: inline-flex; align-items: center; gap: 4px; font-weight: 400; cursor: pointer; }
+#git-sel-count { color: var(--accent-text); font-weight: 600; }
+#git-changes-list li input[type="checkbox"] { flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+.st-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 4px; font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.st-modified { background: #4a3a12; color: var(--yellow); }
+.st-added { background: #12331f; color: var(--green); }
+.st-deleted { background: #3d1715; color: var(--red); }
+.st-untracked { background: #1c2b4a; color: var(--accent-text); }
+.st-renamed, .st-copied, .st-typechange, .st-unmerged { background: var(--panel-2); color: var(--text-dim); }
+#git-cmd-row { display: flex; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border); align-items: center; }
+#git-cmd-row .mono { font-size: 12.5px; color: var(--accent); user-select: none; }
+#git-cmd {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 7px 10px; font-size: 13px; flex: 1; min-width: 240px; font-family: var(--mono);
+}
+#git-cmd:focus { border-color: var(--accent); outline: none; }
+#git-cmd-out {
+  margin: 0; padding: 10px 20px; font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+  background: var(--panel); border-bottom: 1px solid var(--border); color: var(--text);
+}
+#git-cmd-out.err { color: #ff7a7a; }
+#git-cmd-out .cmd-echo { color: var(--accent); }
 #git-commit-list { list-style: none; margin: 0; padding: 12px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 #git-commit-list li { font-size: 12.5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; }
 
@@ -294,9 +436,11 @@ textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-heig
 .settings-grid .settings-card { margin-bottom: 0; }
 .settings-card textarea {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-  border-radius: 6px; padding: 7px 9px; font-family: var(--mono); font-size: 12px;
-  width: 100%; resize: vertical;
+  border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: 12px;
+  width: 100%; resize: vertical; line-height: 1.5; caret-color: var(--accent-text);
 }
+.settings-card textarea:hover { border-color: var(--text-dim); }
+.settings-card textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 
@@ -308,6 +452,14 @@ textarea.desc-input { width: 100%; resize: vertical; min-height: 64px; line-heig
 }
 .project-list li:hover .proj-edit, .project-list li:focus-within .proj-edit { visibility: visible; } /* keyboard users too */
 .project-list li .proj-edit:hover { color: var(--text); }
+.project-list li .proj-open {
+  margin-left: auto; visibility: hidden; background: none; border: none;
+  color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 4px;
+}
+.project-list li .proj-open + .proj-edit { margin-left: 0; }
+.project-list li:hover .proj-open, .project-list li:focus-within .proj-open { visibility: visible; }
+.project-list li .proj-open:hover { color: var(--accent-text); }
+#btn-open-proj-folder { align-self: center; flex-shrink: 0; }
 .btn-danger { background: #3a1d22; border: 1px solid var(--red); color: #ffb4b4; }
 .btn-danger-armed { background: var(--red); color: #fff; font-weight: 600; }
 
@@ -385,6 +537,32 @@ body.dnd-active .card { cursor: grabbing; }
   font-size: 11px; line-height: 18px; text-align: center; vertical-align: middle;
 }
 .tab-badge.hidden { display: none; }
+/* activity dot on a tab (new commits / new timeline events since last visit) */
+.tab-dot {
+  display: inline-block; width: 8px; height: 8px; margin-left: 6px;
+  border-radius: 50%; background: var(--accent); vertical-align: middle;
+}
+.tab-dot.hidden { display: none; }
+/* ---------- first-launch guided tour ---------- */
+#tour { position: fixed; inset: 0; z-index: 90; }
+#tour.hidden { display: none; }
+.tour-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); animation: fadein .15s ease-out; }
+.tour-card { position: fixed; width: 320px; max-width: 92vw; z-index: 91; animation: popin .18s ease-out; }
+.tour-card h3 { margin: 4px 0 8px; }
+.tour-card p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; }
+/* spotlight on the element the current step talks about (pulse killed by reduced-motion) */
+.tour-hl { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; animation: tourpulse 1.4s ease-in-out infinite; }
+@keyframes tourpulse { 0%, 100% { outline-color: var(--accent); } 50% { outline-color: transparent; } }
+/* tactile press feedback on clickable chrome (killed by the reduced-motion rule) */
+.btn, .mini-btn { transition: transform .08s ease, background .15s ease, border-color .15s ease, color .15s ease; }
+.tab { transition: color .15s ease-out, transform .08s ease; }
+.btn:active, .mini-btn:active, .tab:active, .tool-toggle:active { transform: scale(.96); }
+/* task just marked done: one green flash when the card lands in the done column */
+.card.done-flash { border-color: var(--green); animation: doneflash .9s ease-out; }
+@keyframes doneflash {
+  0% { box-shadow: 0 0 0 3px var(--green); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 #toast.ok { border-color: var(--green); color: var(--green); }
 #palette {
   position: fixed; inset: 0; z-index: 60;
@@ -429,6 +607,27 @@ h1.clickable:hover { color: var(--accent-text); }
 #session-eta { margin-left: 4px; }
 #task-modal-title .mini-btn { margin-left: 6px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- motion: loading spinner, status reveal, finite nudge, progress bar ----------
+   Purpose-only animations (loading states + "update available" signal); the global
+   prefers-reduced-motion rule below disables every one of them on request. ---------- */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes status-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(3px); } 70% { transform: translateX(-3px); } }
+@keyframes slide-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+
+.btn .spin { display: inline-block; width: 12px; height: 12px; margin-right: 7px;
+  border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
+  vertical-align: -2px; animation: spin .7s linear infinite; }
+.btn.loading { pointer-events: none; opacity: .8; }
+.status-line.pop, .btn.pop { animation: status-in .25s ease-out; }
+.btn.nudge { animation: nudge .28s ease-in-out 3; } /* finite: 3 shakes when an update is available */
+.upd-progress { display: none; height: 3px; margin-top: 12px; border-radius: 2px;
+  background: var(--panel-2); overflow: hidden; }
+.upd-progress.on { display: block; }
+.upd-progress .bar { height: 100%; width: 25%; background: var(--accent);
+  border-radius: 2px; animation: slide-bar 1s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
@@ -447,20 +646,39 @@ h1.clickable:hover { color: var(--accent-text); }
 /* number inputs: keep the native spinners (usable), dark via color-scheme */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
+/* ...and inside a .stepper the field is a plain text input (numeric), so the
+   native spinner never shows: the custom −/+ buttons are the only steppers */
+.stepper input { -moz-appearance: textfield; }
 
-/* duration stepper in the session panel — matches the DA instead of the light native spinner */
-.stepper { display: inline-flex; align-items: stretch; }
+/* duration stepper in the session panel — ONE seamless segmented pill:
+   a single border around the whole control, children borderless with thin
+   separators, the unit lives inside the field (not a separate chip) */
+.stepper {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  overflow: hidden;
+  transition: border-color .15s ease-out, box-shadow .15s ease-out;
+}
+.stepper:hover { border-color: var(--text-dim); }
+.stepper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .stepper button {
-  width: 24px; padding: 0; background: var(--panel-2); border: 1px solid var(--border);
-  color: var(--text-dim); cursor: pointer; font-size: 14px; line-height: 1;
+  width: 28px; padding: 0; border: none; background: transparent;
+  color: var(--text-dim); cursor: pointer; font-size: 15px; line-height: 1;
+  transition: background-color .12s ease-out, color .12s ease-out;
 }
-.stepper button:hover { color: #fff; background: var(--accent); border-color: var(--accent); }
-.stepper button:first-child { border-radius: 6px 0 0 6px; border-right: none; }
-.stepper button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
-#session-panel .stepper input[type="number"] {
-  width: 52px; border-radius: 0; border-left: none; border-right: none;
-  text-align: center; padding: 5px 2px;
+.stepper button:hover { color: #fff; background: var(--accent); }
+.stepper button:active { transform: translateY(1px); }
+.stepper button:first-of-type { border-right: 1px solid var(--border); }
+.stepper button:last-of-type { border-left: 1px solid var(--border); }
+.stepper-field { display: flex; align-items: center; min-width: 64px; }
+.stepper input {
+  width: 40px; border: none; background: transparent; outline: none;
+  text-align: right; padding: 6px 0 6px 4px; color: var(--text);
+  font-family: var(--mono); font-size: 13px;
 }
+.stepper input::placeholder { color: var(--text-dim); opacity: 0.65; font-family: var(--font); font-size: 12px; }
+.stepper input:not(:placeholder-shown) { color: var(--accent-text); font-weight: 600; }
+.stepper-unit { padding-right: 8px; color: var(--text-dim); font-size: 11px; user-select: none; }
 
 /* settings tab: scrollable + full-width card grid, like the other tabs
    (was: one narrow 560px column, no scroll on short windows) */
@@ -471,21 +689,28 @@ input[type="number"]::-webkit-inner-spin-button { opacity: 1; }
 #stat-cards { flex-shrink: 0; }
 .chart-grid { flex: 1; min-height: 0; }
 
-/* selects: custom chevron + dark popup, consistent with the other inputs
+/* selects: ONE global rule so every dropdown (toolbars, header, modals, cards)
+   gets the dark box + custom chevron + dark popup list, consistent with inputs
    (was: native light arrow and light dropdown list on the dark theme) */
-#task-toolbar select, #session-panel select, #git-toolbar select, #stats-toolbar select,
-.settings-card select, .modal-card select, .feat-actions select {
+select {
+  background-color: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 28px 6px 8px; font: inherit; cursor: pointer;
   -webkit-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa3b2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 9px center;
-  padding-right: 28px;
 }
+select:hover { border-color: var(--text-dim); }
+select:focus { border-color: var(--accent); outline: none; }
+select:disabled { opacity: .55; cursor: default; }
 #git-toolbar select { /* had no base styling at all */
   background-color: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 5px 28px 5px 8px; font: inherit;
 }
-select option { background: var(--panel-2); color: var(--text); }
+select option, select optgroup { background-color: var(--panel-2); color: var(--text); }
+select option:checked { background-color: var(--accent); color: #fff; }
+select option:hover { background-color: var(--panel); }
 
 /* native folder-picker button next to a path input (modals, git toolbar) */
 .path-row { display: flex; gap: 8px; }
@@ -543,7 +768,11 @@ input, select, textarea, button {
               color .15s ease-out, opacity .15s ease-out, transform .12s ease-out,
               filter .15s ease-out;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
+input:hover, textarea:hover { border-color: var(--text-dim); }
+input::placeholder, textarea::placeholder { color: var(--text-dim); opacity: .55; font-style: italic; }
+::selection { background: rgba(37, 99, 235, .35); }
+input, textarea { caret-color: var(--accent-text); }
 .btn:hover { border-color: var(--accent); }
 .btn-primary:hover { filter: brightness(1.15); }
 .btn:active { transform: scale(.97); }
@@ -572,9 +801,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 /* modals & toast: quick, purposeful entrance (exit is instant) */
 #modal, #modal-edit, #modal-task, #modal-help, #modal-feat, #palette { animation: fadein .15s ease-out; }
 .modal-card, .palette-card { animation: popin .18s ease-out; }
+#modal.closing, #modal-edit.closing, #modal-task.closing, #modal-help.closing, #modal-feat.closing, #palette.closing {
+  animation: fadeout .13s ease-in forwards; /* animated close (hideAnimated), then .hidden */
+}
 #toast { animation: toastin .2s ease-out; }
+#toast.out { animation: toastout .16s ease-in forwards; }
+.tab-page.enter { animation: page-in .18s ease-out; } /* tab switch: the new page slides up once */
 @keyframes fadein { from { opacity: 0; } }
+@keyframes fadeout { to { opacity: 0; } }
 @keyframes popin { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes toastout { to { opacity: 0; transform: translateY(8px); } }
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes toastin { from { opacity: 0; transform: translateY(10px); } }
 
 /* running session: the timer dot pulses — a real live state, not decoration */
@@ -679,3 +916,168 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 }
 .commit-hash { cursor: copy; }
 .commit-hash:hover { color: var(--accent-text); text-decoration: underline; }
+
+/* ---------- timeline tab ---------- */
+#tl-toolbar { display: flex; gap: 14px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+#tl-toolbar label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+#tl-list { list-style: none; margin: 0; padding: 10px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.tl-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid transparent; animation: tl-in 0.25s ease-out;
+}
+@keyframes tl-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.tl-row:hover { background: var(--panel-2); border-color: var(--border); }
+.tl-icon { flex: none; width: 22px; text-align: center; }
+.tl-label { font-size: 13px; white-space: nowrap; }
+.tl-detail { flex: 1; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-time { flex: none; font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+.tl-empty { padding: 30px 20px; color: var(--text-dim); font-size: 13px; text-align: center; }
+
+/* ---------- estimate vs actual ---------- */
+.est.over { color: #e5a13d; }
+.est.under { color: #3fb27f; }
+#est-box { min-width: 260px; }
+#est-summary { font-size: 12px; margin: 4px 0 2px; }
+#est-over-line { font-size: 11px; margin-bottom: 6px; }
+#est-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#est-table th { text-align: left; color: var(--text-dim); font-weight: 500; font-size: 11px; padding: 2px 6px 4px 0; border-bottom: 1px solid var(--border); }
+#est-table td { padding: 3px 6px 3px 0; border-bottom: 1px solid var(--border); vertical-align: middle; }
+#est-table td.num { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+#est-table .est-bar-row { display: inline-block; height: 6px; border-radius: 3px; background: var(--panel-2); position: relative; overflow: hidden; min-width: 60px; vertical-align: middle; }
+#est-table .est-bar-row .est-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent, #2563eb); border-radius: 3px; }
+#est-table .est-bar-row .act-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #e5a13d; border-radius: 3px; opacity: 0.85; }
+#est-table .est-bar-row.over .act-fill { background: #e5484d; }
+
+/* ---------- collapsible sidebar (persisted) ---------- */
+.brand-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sidebar-toggle {
+  flex-shrink: 0; width: 22px; height: 22px; padding: 0 0 1px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim);
+  cursor: pointer; font-size: 14px; line-height: 1;
+  transition: background-color .15s ease-out, color .15s ease-out, border-color .15s ease-out, transform .2s ease-out;
+}
+.sidebar-toggle:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+body.sidebar-collapsed #sidebar { width: 54px; padding: 14px 7px; }
+body.sidebar-collapsed .brand-row { flex-direction: column; gap: 8px; }
+body.sidebar-collapsed .brand { font-size: 0; margin-bottom: 0; gap: 0; }
+body.sidebar-collapsed .sidebar-toggle { transform: rotate(180deg); }
+body.sidebar-collapsed #btn-new-project { display: none; }
+body.sidebar-collapsed .project-list { margin-top: 10px; }
+body.sidebar-collapsed .project-list li { padding: 7px; justify-content: center; gap: 0; }
+body.sidebar-collapsed .project-list li > *:not(.dot) { display: none; } /* only the color dot remains */
+body.sidebar-collapsed .sidebar-footer { font-size: 0; text-align: center; } /* only the live dot remains */
+body.sidebar-collapsed #sidebar { transition: width .18s ease-out, padding .18s ease-out; }
+
+/* corbeille (soft-deleted rows) */
+#trash-view { flex: 1; overflow-y: auto; padding: 16px 20px; }
+#trash-head h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
+#trash-empty { margin-top: 14px; padding: 40px 20px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+#trash-empty .empty-icon { font-size: 34px; margin-bottom: 8px; }
+#trash-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.trash-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; opacity: .85; }
+.trash-row .t-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- responsive: the app adapts to the window size / screen resolution -------
+   breakpoints: 1180px (denser), 920px (sidebar -> icon rail, kanban stacks
+   vertically instead of scrolling sideways, charts 1-col), 640px (compact) */
+
+@media (max-width: 1180px) {
+  #kanban { gap: 8px; padding: 12px 14px; }
+  .col { min-width: 200px; }
+  #task-toolbar, #log-toolbar, #git-toolbar, #git-cmd-row, #stats-toolbar, #tabs {
+    padding-left: 14px; padding-right: 14px;
+  }
+  #stat-cards, .chart-grid, #log-list, #git-commit-list { padding-left: 14px; padding-right: 14px; }
+  #git-status, #git-cmd-out { padding-left: 14px; padding-right: 14px; }
+}
+
+@media (max-width: 920px) {
+  /* sidebar becomes an icon rail; the manual toggle only makes sense on wide windows */
+  #btn-sidebar-toggle { display: none; }
+  #sidebar { width: 54px; padding: 14px 7px; }
+  .brand-row { flex-direction: column; gap: 8px; }
+  .brand { font-size: 0; margin-bottom: 0; gap: 0; }
+  #btn-new-project { display: none; }
+  .project-list { margin-top: 10px; }
+  .project-list li { padding: 7px; justify-content: center; gap: 0; }
+  .project-list li > *:not(.dot) { display: none; } /* only the color dot remains */
+  .sidebar-footer { font-size: 0; text-align: center; }
+
+  /* kanban columns stack vertically: no horizontal scroll */
+  #kanban { flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+  .col { min-width: 0; }
+  #kanban .col.col-collapsed { min-width: 0; }
+
+  .chart-grid { grid-template-columns: 1fr; }
+  #est-box { overflow: auto; } /* the estimates table scrolls inside its box */
+
+  /* toolbars wrap / inputs shrink instead of overflowing */
+  #log-toolbar, #git-toolbar, #git-cmd-row { flex-wrap: wrap; }
+  #log-toolbar input, #git-toolbar input[type="text"], #git-cmd { flex: 1 1 120px; min-width: 0; }
+  #log-content { min-width: 0; flex: 1 1 160px; }
+  #log-search { width: auto; flex: 1 1 90px; min-width: 0; }
+  #log-tags { width: 110px; flex-shrink: 0; }
+  #new-task-title { min-width: 110px; }
+  #stats-toolbar { gap: 8px; }
+  #stats-toolbar label { flex: 1 1 auto; }
+
+  /* header session panel wraps instead of overflowing */
+  #session-panel { flex-wrap: wrap; }
+  #session-panel select, #session-panel input { max-width: 100%; min-width: 0; }
+}
+
+@media (max-width: 640px) {
+  #sidebar { width: 46px; padding: 10px 5px; }
+  #main { min-width: 0; }
+  .tab { padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+  #tabs { padding: 6px 10px 0; }
+  #project-header { padding: 10px 12px; }
+  #project-header h1, #project-header-left h1 { font-size: 16px; }
+  #task-toolbar, #log-toolbar, #git-toolbar, #stats-toolbar { padding: 10px 12px; gap: 6px; }
+  #kanban { padding: 10px; gap: 8px; }
+  .card .actions { flex-wrap: wrap; }
+  #stat-cards { gap: 8px; padding: 10px 12px; }
+  .stat-card { min-width: 0; flex: 1 1 40%; padding: 8px 12px; }
+  .stat-value { font-size: 18px; }
+  .chart-grid { grid-template-columns: 1fr; padding: 0 12px 12px; gap: 8px; }
+  .chart-box { height: 200px; padding: 10px; }
+  #est-box { min-width: 0; }
+  .settings-grid { grid-template-columns: 1fr; }
+  #log-list, #git-commit-list { padding: 10px 12px; }
+  #git-cmd-out { max-height: 160px; }
+  .modal-card { width: 94vw; max-height: 92vh; padding: 14px; }
+  .palette-card { width: 94vw; }
+  #toast { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+  .trash-row { flex-wrap: wrap; }
+  #session-panel { gap: 6px; }
+  #session-panel select, #session-panel input { flex: 1 1 100px; }
+  #session-timer { font-size: 13px; padding: 4px 8px; }
+}
+
+/* ---------- wide / maximized windows: use the extra space (set by updateWinMode in app.js) ---------- */
+body.wide #kanban { gap: 16px; padding: 20px 28px; }
+body.wide .col { min-width: 300px; }
+body.wide #task-toolbar, body.wide #log-toolbar, body.wide #git-toolbar,
+body.wide #git-cmd-row, body.wide #stats-toolbar, body.wide #tabs {
+  padding-left: 28px; padding-right: 28px;
+}
+body.wide #stat-cards, body.wide .chart-grid, body.wide #log-list,
+body.wide #git-commit-list, body.wide #git-status, body.wide #git-cmd-out {
+  padding-left: 28px; padding-right: 28px;
+}
+body.wide .chart-box { height: 340px; }
+body.maximized:not(.sidebar-collapsed) #sidebar { width: 264px; } /* full sidebar on a big screen, unless the user collapsed it */
+body.maximized #git-cmd-out { max-height: 55vh; }
+body.maximized .modal-card { width: min(760px, 92vw); }
+body.maximized .palette-card { width: min(640px, 92vw); }
+
+/* ---------- short windows (landscape laptops, split screen): compact vertical chrome ---------- */
+@media (max-height: 720px) {
+  #project-header { padding: 6px 14px; row-gap: 2px; }
+  #tabs { padding-top: 4px; }
+  .tab { padding: 5px 12px; }
+  #kanban { padding-top: 10px; padding-bottom: 10px; }
+  .chart-box { height: 210px; }
+  #git-cmd-out { max-height: 32vh; }
+  .modal-card { max-height: 94vh; }
+}

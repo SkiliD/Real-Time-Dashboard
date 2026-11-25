@@ -48,6 +48,9 @@ if IS_WIN:
         exe_meta["version"] = version_file
     if os.path.isfile(manifest_file):
         exe_meta["manifest"] = manifest_file
+    icon_file = os.path.join(SPECPATH, "devdash", "gui", "icon.ico")
+    if os.path.isfile(icon_file):
+        exe_meta["icon"] = icon_file  # exe + taskbar icon when launched as devdash.exe
 
 a = Analysis(
     ["devdash/__main__.py"],   # same entry point as `python -m devdash`

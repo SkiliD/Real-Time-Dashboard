@@ -11,7 +11,7 @@ from devdash.core import config as cfgmod
 from devdash.core import sessions as core
 from devdash.core.i18n import tr, tr_cols
 from ..deps import get_conn, guard, resolve_project
-from ..output import emit
+from ..output import emit, fmt_date, fmt_time
 
 app = typer.Typer(help=tr("group.session.help"))
 console = Console()
@@ -73,7 +73,7 @@ def start_cmd(
     task: int | None = typer.Option(None, "--task", "-t", help=tr("opt.task_session")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
     kind: str = typer.Option("focus", "--kind",
-                             help=tr("opt.kind", list=", ".join(core.VALID_KINDS))),
+                             help=tr("opt.kind", items=", ".join(core.VALID_KINDS))),
     minutes: int | None = typer.Option(None, "--minutes", "-m", help=tr("opt.minutes")),
     background: bool = typer.Option(False, "--background", "-b", help=tr("opt.background")),
     pomodoro: bool = typer.Option(False, "--pomodoro", help=tr("opt.pomodoro")),
@@ -151,7 +151,7 @@ def list_cmd(
             table.add_column(col)
         for r in rows:
             dur = f"{r.duration_min}m" if r.duration_min is not None else tr("session.running")
-            table.add_row(str(r.id), r.kind, dur, r.started_at[11:19] + " " + r.started_at[:10],
+            table.add_row(str(r.id), r.kind, dur, fmt_time(r.started_at) + " " + fmt_date(r.started_at),
                           str(r.project_id), f"#{r.task_id}" if r.task_id else "", r.note[:40])
         console.print(table)
 

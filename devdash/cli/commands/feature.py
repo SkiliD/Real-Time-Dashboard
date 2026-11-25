@@ -9,7 +9,7 @@ from rich.table import Table
 from devdash.core import features as core
 from devdash.core.i18n import tr, tr_cols
 from ..deps import get_conn, guard, resolve_project, read_text_file
-from ..output import emit
+from ..output import emit, fmt_ts
 
 app = typer.Typer(help=tr("group.feature.help"))
 console = Console()
@@ -27,7 +27,7 @@ def _render_table(rows) -> None:
             str(r["id"]), r["name"],
             f"[{_STATUS_STYLE.get(r['status'], '')}]{r['status']}[/]",
             f"{p.get('done', 0)}/{p.get('total', 0)} {tr('demo.count.tasks')} ({p.get('pct', 0)}%)",
-            r.get("source", ""), (r.get("validated_at") or "")[:16].replace("T", " "),
+            r.get("source", ""), fmt_ts(r.get("validated_at")),
         )
     console.print(table)
 
@@ -232,8 +232,10 @@ def delete_feature(
     ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
     project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
     yes: bool = typer.Option(False, "--yes", "-y", help=tr("opt.yes")),
+    permanent: bool = typer.Option(False, "--permanent", help=tr("opt.permanent")),
 ) -> None:
-    """Permanently delete a feature. Linked tasks are detached, not deleted."""
+    """Delete a feature: soft (trash, restorable) by default; --permanent is a
+    hard delete (linked tasks are detached, not deleted). Asks unless --yes."""
     conn = get_conn(ctx)
     pid = resolve_project(conn, project).id if project else None
     f = core.get(conn, ref, pid)
@@ -241,6 +243,24 @@ def delete_feature(
         raise typer.BadParameter(tr("err.no_feature", ref=ref))
     if not yes and not typer.confirm(tr("feature.delete.confirm", name=f.name)):
         raise typer.Abort()
-    guard(core.delete, conn, f.id, pid)
-    emit(ctx, {"deleted": f.id, "name": f.name},
-         lambda: console.print(tr("feature.deleted", name=f.name)))
+    guard(core.delete, conn, f.id, pid, permanent=permanent)
+    if permanent:
+        emit(ctx, {"deleted": f.id, "name": f.name},
+             lambda: console.print(tr("feature.deleted", name=f.name)))
+    else:
+        emit(ctx, {"deleted": f.id, "name": f.name, "soft": True},
+             lambda: console.print(tr("feature.delete.soft", name=f.name)))
+
+
+@app.command("restore", help=tr("feature.restore.help"))
+def restore_feature(
+    ctx: typer.Context,
+    ref: str = typer.Argument(..., help=tr("opt.ref_feat")),
+    project: str | None = typer.Option(None, "--project", "-p", help=tr("opt.project_default")),
+) -> None:
+    """Restore a feature from the trash."""
+    conn = get_conn(ctx)
+    pid = resolve_project(conn, project).id if project else None
+    f = guard(core.restore, conn, ref, pid)
+    emit(ctx, {"restored": f.id, "name": f.name},
+         lambda: console.print(tr("feature.restored", name=f.name)))

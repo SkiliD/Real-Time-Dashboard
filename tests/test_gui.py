@@ -276,3 +276,63 @@ def test_ai_endpoints(home):
     assert p["applied"] is False and len(p["proposal"]) == 3
     p2 = api.ai_plan({"title": "système de dash", "apply": True})
     assert p2["applied"] is True and len(p2["created_task_ids"]) == 3
+
+
+def test_data_i18n_elements_must_be_leaves():
+    """applyI18n() sets textContent on every [data-i18n] element; that DESTROYS
+    nested elements (regression: #btn-git-changes contained #git-changes-count,
+    wiped at boot -> 'Cannot set properties of null (setting textContent)' on the
+    next git render). Invariant: a data-i18n element must be a leaf — put the
+    label on an inner span instead."""
+    from html.parser import HTMLParser
+
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr"}
+    html_path = Path(__file__).parent.parent / "devdash" / "gui" / "static" / "index.html"
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.stack = []  # (tag, has_data_i18n, line)
+            self.bad = []
+
+        def handle_starttag(self, tag, attrs):
+            has = any(k == "data-i18n" for k, _ in attrs)
+            if tag in VOID:
+                if has:
+                    return  # void element: leaf by definition, fine
+                # a void child still counts as an element child for open parents
+                for t, hi, ln in self.stack:
+                    if hi:
+                        self.bad.append((t, ln))
+                return
+            for t, hi, ln in self.stack:
+                if hi:
+                    self.bad.append((t, ln))
+            self.stack.append((tag, has, self.getpos()[0]))
+
+        def handle_endtag(self, tag):
+            while self.stack and self.stack[-1][0] != tag:
+                self.stack.pop()
+            if self.stack:
+                self.stack.pop()
+
+    p = P()
+    p.feed(html_path.read_text(encoding="utf-8"))
+    assert not p.bad, f"data-i18n elements with element children (applyI18n would wipe them): {p.bad}"
+
+
+def test_task_add_with_feature_id_gui_api(home):
+    """POST /api/tasks/add accepts feature_id: create a task directly linked
+    to a feature (no two-step attach needed)."""
+    api = Api(home=home)
+    api.projects_create({"name": "FeatProj", "engine": "web", "set_active": True})
+    f = api.features_add({"name": "dash", "description": "dash du joueur"})
+    t = api.tasks_add({"title": "Implémenter le dash", "feature_id": f["id"]})
+    assert t["feature_id"] == f["id"]
+    # unknown feature -> clean 400, not a 500
+    from devdash.gui.api import ApiError
+    import pytest
+    with pytest.raises(ApiError) as e:
+        api.tasks_add({"title": "x", "feature_id": 9999})
+    assert e.value.status == 400

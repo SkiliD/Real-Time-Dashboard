@@ -28,12 +28,15 @@ def test_provider_catalog_is_public_metadata(home):
     api = Api(home=home)
     provs = api.ai_providers()["providers"]
     ids = {p["id"] for p in provs}
-    assert {"ollama", "local", "cli", "mock", "anthropic", "mistral", "openai", "openai_compat"} <= ids
+    assert {"ollama", "local", "cli", "mock", "anthropic", "mistral", "openai", "openai_compat",
+            "openrouter"} <= ids
     allowed_fields = {"id", "scope", "needs_model", "needs_key", "needs_base_url",
-                      "needs_cli_command", "default_base_url"}
+                      "needs_cli_command", "default_base_url", "models"}
     for p in provs:
         assert p["scope"] in ("local", "cloud")
         assert set(p) <= allowed_fields  # metadata only: no secret material in the catalog
+        # models = [{id, label}] preset list for the dropdown; never a secret
+        assert all(set(m) == {"id", "label"} for m in p["models"])
     # local providers are flagged local, cloud ones cloud
     by_id = {p["id"]: p for p in provs}
     assert by_id["ollama"]["scope"] == "local" and by_id["cli"]["scope"] == "local"
@@ -210,7 +213,7 @@ def test_http_ai_config_flow(home):
             _post(base, "/api/ai/config", {"ai_provider": "nope"})
             assert False
         except urllib.error.HTTPError as e:
-            assert e.code == 400 and "unknown ai_provider" in e.read().decode()
+            assert e.code == 400 and "ai_provider inconnu" in e.read().decode()  # localized err.ai_provider_unknown (default lang fr)
 
         # wrong Host -> 403 (CSRF guard also covers the new routes)
         try:

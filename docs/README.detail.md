@@ -14,13 +14,13 @@
 - Sans cloud, sans compte, sans serveur distant.
 - Agnostique du moteur : Unity, Unreal, Godot, web, ou autre.
 - Multi-projets : changer de projet actif ne touche jamais aux données des autres.
-- La GUI est une **vraie fenêtre native** (PyWebView / WebView2 sous Windows), pas une web app : pas d'onglet navigateur, RAM maîtrisée, aucun lien avec Internet requis (Chart.js est embarqué localement).
+- La GUI est une **vraie fenêtre native** (PyWebView / WebView2 sous Windows), pas une web app : pas d'onglet navigateur, RAM maîtrisée, aucun lien avec Internet requis (Chart.js est embarqué localement). La fenêtre est **sans bordure OS** (`frameless`) avec une barre de titre maison (glisser pour déplacer, boutons réduire / agrandir / fermer, double-clic sur la barre pour agrandir) ; en mode navigateur (`--browser`) la barre est masquée et le rendu est inchangé. La fenêtre native embarque l'icône de l'app (`devdash/gui/icon.ico`, multi-tailles) pour la barre des tâches et Alt-Tab ; l'exécutable `devdash.exe` l'utilise aussi comme icône de fichier.
 
 ---
 
 ## 1. Installation
 
-Prérequis : **Python 3.11+** (testé avec 3.13/3.15). Aucune dépendance pour le cœur.
+Prérequis : **Python 3.11+** (CI : testé avec 3.11 et 3.13 sur 3 OS). Aucune dépendance pour le cœur.
 
 ### Windows
 
@@ -69,7 +69,7 @@ directement (avec `PYTHONPATH` sur le dossier du projet).
 
 ### Exécutable autonome (sans installer Python)
 
-PyInstaller fabrique un binaire unique, double-cliquable :
+PyInstaller fabrique un exécutable double-cliquable (dossier onedir par défaut, `--onefile` pour un fichier unique) :
 
 ```bash
 pip install -e ".[build]"            # ajoute pyinstaller
@@ -133,17 +133,23 @@ Des endpoints en lecture seule exposent aussi la liste des tags (`GET /api/tags`
 les dépôts Git liés (`GET /api/git/repos`) et les fichiers de `DEVDASH_HOME`
 (`GET /api/files` : sauvegardes/exports, jamais `config.json`), confinés au
 répertoire home local. `POST /api/features/propose` (lecture seule aussi :
-propositions de l’IA en attente de validation humaine). `POST /api/fs/pick` ouvre le sélecteur de dossier natif
+propositions de l’IA en attente de validation humaine). `GET /api/session/current` (session en cours) et `GET /api/tasks/tree` (arborescence avec rollups) sont aussi exposés comme **API publique** (tests / consommateurs externes), même si la GUI lit la session via `/api/status` et construit l'arbre côté client. `POST /api/fs/pick` ouvre le sélecteur de dossier natif
 de l'OS sur le bureau et renvoie le chemin choisi (ou `null` si annulé) — la
 GUI ne fait que pré-remplir le champ chemin ; connecter un dossier ou lier un
 dépôt reste une action explicite de l'utilisateur.
 
-Onglets : **Tâches** (kanban), **Devlog**, **Git**, **Features**, **Stats**
-(graphiques Chart.js embarqués), **Assistant IA** (visible uniquement si l'IA
-est activée), **Réglages** (toujours visible : provider IA local ou cloud +
+Onglets : **Tâches** (kanban avec sous-tâches empilables façon Notion/Trello :
+glisser une carte sur une autre = sous-tâche, barre de progression x/y sur le
+parent, bouton « ＋ sous-tâche », bascule empilé/à plat dans la barre d'outils ;
+pour les gros projets : colonnes repliables (clic sur l'en-tête, persisté),
+plafond de 40 cartes/ colonne avec bouton « ▸ voir N de plus », bouton
+« ✖ filtres » pour tout effacer d'un coup ; case « Corbeille » : les suppressions (tâches, devlog, features) sont **douces** par défaut — restaurables, définitives en 2 clics depuis la corbeille),
+**Devlog**, **Git**, **Features**, **Stats**
+(graphiques Chart.js embarqués + encadré « Estimé vs réel » (estimation vs temps réellement passé, par tâche et agrégé) + bouton « ⬇ Rapport hebdo (.md) »), **Timeline** (fil d'activité du projet — tâches, sessions, devlog, commits git, features — du plus récent au plus ancien, avec filtre par type), **Assistant IA** (visible uniquement si l'IA
+est activée ; l'historique du chat est **persisté** en base et effaçable depuis l'onglet), **Réglages** (toujours visible : provider IA local ou cloud +
 test de connexion + fonctions actives, mais aussi langue de l'interface,
 Pomodoro, intervalle du watcher Git, port de la GUI, patterns de commits,
-et bouton de sauvegarde zip).
+thème (sombre / clair / **auto** = suit l'OS), sauvegarde **auto** (tous les N jours, conserve les K derniers zip), et bouton de sauvegarde zip).
 
 ## 4. Référence CLI
 
@@ -154,33 +160,47 @@ la commande) pour une sortie machine.
 |---|---|---|
 | `projects list` | `devdash projects list` | liste, `*` = actif |
 | `projects create` | `devdash projects create "Aether Vale" --engine unity --status development --color #7c5cff --set-active` | `--engine`, `--status`, `--color`, `--description`, `--set-active` |
-| `projects connect <path>` | `devdash projects connect "C:\jeux\aether-vale" --set-active` | **connecte un dossier existant** : moteur auto-détecté (`ProjectSettings/ProjectVersion.txt` → unity, `*.uproject` → unreal, `project.godot` → godot, `package.json` → web), nom suggéré depuis le dossier, racine git trouvée en remontant l'arborescence et **auto-liée en lecture seule** (commits importés immédiatement) ; `--no-git` pour refuser, `--engine` pour forcer |
+| `projects connect <path>` | `devdash projects connect "C:\jeux\aether-vale" --set-active` | **connecte un dossier existant** : moteur auto-détecté (`ProjectSettings/ProjectVersion.txt` → unity, `*.uproject` → unreal, `project.godot` → godot, `package.json` → web), nom suggéré depuis le dossier, racine git trouvée en remontant l'arborescence et **auto-liée en lecture seule** (commits importés immédiatement) ; `--no-git` pour refuser, `--engine` pour forcer. Le dossier est **mémorisé** sur le projet (colonne `path`) |
+| `projects open [ref]` | `devdash projects open` | ouvre le **dossier connecté** du projet (actif par défaut) dans l'explorateur de fichiers — GUI : boutons 📂 dans la sidebar et l'en-tête ; MCP : `devdash_projects_open` ; API : `POST /api/projects/open`. Chemin stocké côté serveur, ouvert en argv sans shell, 400 propre s'il n'existe plus |
 | `projects set-active <ref>` | `devdash projects set-active aether-vale` | **sans perte** : simple pointeur, les autres projets gardent tout |
-| `projects show/update/archive` | `devdash projects show aether-vale` | détail, édition, archivage. **Suppression dure** : possible depuis la GUI (sidebar ✎ → Supprimer, confirmation en 2 clics) via `POST /api/projects/delete` — cascade complète (tâches, sessions, devlog, commits liés), le projet actif est réassigné |
-| `task add` | `devdash task add "Dash" -p high -t gameplay -t combat --est 90` | `-p` projet (défaut: actif), `--parent` sous-tâche |
-| `task list` | `devdash task list -s todo --priority high --tag ui --feature dash` | filtres statut/priorité/tag/feature |
+| `projects show/update/archive` | `devdash projects show aether-vale` ; `devdash projects update aether-vale --status beta` ; `devdash projects archive aether-vale` | détail, édition, archivage. **Suppression dure** : `devdash projects delete aether-vale` (confirmation requise) ou depuis la GUI (sidebar ✎ → Supprimer, 2 clics) via `POST /api/projects/delete` — cascade complète (tâches, sessions, devlog, commits liés), le projet actif est réassigné |
+| `task add` | `devdash task add "Dash" -p high -t gameplay -t combat --est 90` | `-p` projet (défaut: actif), `--parent` sous-tâche, `--feature <id>` (id numérique, ex. `--feature 3`) pour lier à une feature dès la création |
+| `task list` | `devdash task list -s todo --priority high --tag ui --feature dash --limit 20` | filtres statut/priorité/tag/feature + `--limit` pour les gros projets |
+| `task tree` | `devdash task tree` | arborescence : sous-tâches empilées sous le parent + progression (x/y) |
+| `task show <id>` | `devdash task show 3` | détail d'une tâche + ses sous-tâches |
 | `task start/done/cancel/reopen <id>` | `devdash task done 3` | changement de statut |
-| `task edit <id>` | `devdash task edit 3 --priority critical --tag vfx` | édition |
-| `task delete <id>` | `devdash task delete 3 --yes` | suppression définitive (sous-tâches suivies) |
+| `task edit <id>` | `devdash task edit 3 --priority critical --parent 7` / `--unparent` | édition ; `--parent N` empile la tâche sous #N (anti-cycle), `--unparent` la détache |
+| `task delete <id>` | `devdash task delete 3 --yes` | suppression **douce** par défaut (corbeille, sous-tâches suivies) ; `--permanent` = définitive |
+| `task restore <id>` | `devdash task restore 3` | restaure une tâche de la corbeille (avec ses sous-tâches) |
 
 Les projets ont aussi une **couleur** (qui thème l'interface quand le projet est actif) et des **langages** (`--lang csharp --lang gdscript`, modifiables dans la GUI) : `devdash projects create "Mon Jeu" --engine unity --lang csharp`.
 | `session start` | `devdash session start --task 3 --kind focus --pomodoro` | minuteur interactif ; `--background` pour rendre la main, `--pomodoro` = après le focus, propose de lancer la pause automatiquement |
 | `session stop` | `devdash session stop --note "fait: X, bloqué: Y"` | durée + note de fin |
 | `session now` / `session list` | `devdash session list --week` | session en cours / historique (`--today`, `--week`, `-t <id tâche>`) |
 | `log add` | `devdash log add "idée: dash aérien chaîné" --tag idea` | entrée de devlog |
-| `log recent` / `log search` | `devdash log search "cooldown"` | journal daté, recherchable |
+| `log recent` / `log list` / `log search` | `devdash log search "cooldown"` | journal daté, recherchable (`list` = alias de `recent`) |
+| `log edit` / `log delete` / `log restore <id>` | `devdash log delete 5 --yes` ; `devdash log restore 5` | édition ; suppression **douce** par défaut (corbeille), `--permanent` = définitive |
 | `git link <path>` | `devdash git link "C:\repo"` | lie le projet actif à un dépôt (lecture seule) |
+| `git unlink` | `devdash git unlink` | délie le dépôt du projet actif (les commits en cache sont conservés) |
 | `git sync` | `devdash git sync` | importe les nouveaux commits (tous projets si `-p` omis) |
 | `git log` | `devdash git log --task 3` | commits liés à une tâche (`--unparsed` = non reconnus) |
 | `git status` | `devdash git status` | branche, dernier commit, commits/jour |
+| `git run <cmd>` | `devdash git run "log --oneline -5"` | exécute une commande git **en lecture seule** dans le dépôt lié (GUI : ligne terminal dans l'onglet Git ; MCP : `devdash_git_run`). Liste blanche de sous-commandes (`log`, `diff`, `status`, `branch -a`…), pas de shell, options interdites refusées, confinée au dépôt lié, avec timeout — les commandes d'écriture (`push`, `commit`, `branch -d`…) sont refusées avec une explication |
+| `git fetch` | `devdash git fetch` | met à jour les refs distantes du dépôt lié (lecture distante ; GUI : bouton « ⇩ Fetch » ; MCP : `devdash_git_remote`) |
+| `git pull` | `devdash git pull` | avance la branche en **fast-forward uniquement** (`--ff-only`, jamais de fusion forcée ; GUI : « ⇩ Pull » ; MCP : `devdash_git_remote`) |
+| `git remote` | `devdash git remote` | liste les remotes configurés du dépôt lié (`remote -v`, lecture seule ; MCP : `devdash_git_remote`) |
 | `git ignore` | `devdash git ignore [--repo <path>]` | écrit/rafraîchit le **bloc balisé** `# >>> devdash >>>` dans le `.gitignore` du dépôt lié : `.devdash/`, `devdash.db*`, snapshots, `devdash-backup-*.zip`, `devdash-export-*.json`, et `<home>/config.json` si `DEVDASH_HOME` est dans le dépôt (clés API). Idempotent (jamais dupliqué), contenu existant préservé. **Seul fichier que DevDash écrit dans votre dépôt, et seulement sur cette commande explicite** — l'historique git reste intouché |
 | `feature add/list/show` | `devdash feature add dash` ; `devdash feature list` ; `devdash feature show dash` | création/liste/détail (progression, tâches liées) |
+| `feature propose <name>` | `devdash feature propose dash` | enregistre une proposition (utilisé par l'assistant IA ; ne marque JAMAIS terminée) |
 | `feature link/unlink` | `devdash feature link dash 3 4` ; `devdash feature unlink dash 3` | attacher/détacher des tâches |
 | `feature done/reopen` | `devdash feature done dash` ; `devdash feature reopen dash` | **validation manuelle** d'une feature (seul un humain peut la fermer) |
 | `feature approve/reject` | `devdash feature reject dash --feedback "pas assez testé"` | approuver/rejeter une proposition IA (le rejet est mémorisé) |
-| `feature edit/delete` | `devdash feature edit dash --name air-dash` ; `devdash feature delete dash --yes` | renommage (unique par projet) / suppression définitive (les tâches sont détachées, jamais supprimées) ; aussi éditable depuis la GUI (✎/🗑 sur la carte feature) via `POST /api/features/update` et `POST /api/features/delete` |
+| `feature edit/delete` | `devdash feature edit dash --name air-dash` ; `devdash feature delete dash --yes` | renommage (unique par projet) / suppression **douce** par défaut (corbeille, restaurable via `feature restore`) — `--permanent` = définitive (les tâches sont détachées, jamais supprimées) ; aussi éditable depuis la GUI (✎/🗑 sur la carte feature) via `POST /api/features/update` et `POST /api/features/delete` |
 | `status` | `devdash status` ; `devdash status --watch` | instantané temps réel (tâches, session, streak, git) |
 | `stats today/week/month/streak/tags/all` | `devdash stats week` | temps, tâches faites, streak, répartition par tag |
+| `stats estimates` | `devdash stats estimates` | **estimé vs réel** : estimation de chaque tâche vs minutes réellement passées (sessions), + agrégat (total estimé/réel, % , nb au-dessus/en dessous) |
+| `timeline` | `devdash timeline --limit 50 [--type task]` | **fil d'activité** du projet (bus d'événements : tâches, sessions, devlog, commits git…), du plus récent au plus ancien ; GUI : onglet Timeline, MCP : `devdash_timeline` |
+| `report` | `devdash report --period week [--out rapport.md] [--ai]` | **rapport markdown** semaine/mois 100 % local (temps par jour, tâches faites, commits liés, devlog, estimé vs réel) ; `--ai` ajoute le résumé IA si configuré ; GUI : bouton « ⬇ Rapport hebdo » dans Stats (`POST /api/report`), MCP : `devdash_report` |
 | `ai context` | `devdash ai context` | **affiche le contexte exact** qui serait envoyé à l'IA — rien n'est envoyé, même IA activée |
 | `ai ask` | `devdash ai ask "où en suis-je ?"` | chat (si IA activée) |
 | `ai summarize` | `devdash ai summarize --period week` | résumé de la semaine |
@@ -193,9 +213,11 @@ Les projets ont aussi une **couleur** (qui thème l'interface quand le projet es
 | `export` | `devdash export --out export.json` | **export JSON complet** (toutes les tables) pour archive/migration/inspection — lecture seule |
 | `import` | `devdash import export.json [--force]` | restaure un export JSON dans la base (refusé si la base n’est pas vide, sauf `--force`) |
 | `mcp` | `devdash mcp` | serveur **MCP** (JSON-RPC stdio) pour connecter DevDash à un agent IA externe |
+| `mcp-config` | `devdash mcp-config vscode [--write]` | imprime (ou écrit) le extrait de config MCP pour VS Code, Cursor, Vibe ou Claude Desktop |
 | `gui` | `devdash gui` | fenêtre graphique native |
 | `version` | `devdash version` | version + hash git du checkout |
 | `update` | `devdash update [--check] [--no-reinstall]` · `update check` · `update status` | **auto-mise à jour** : install git → `git pull --ff-only` (jamais de force, refus si arbre sale) + `pip install -e .` pour rafraîchir les dépendances ; install pip/pipx → affiche la bonne commande ; exécutable → rebuild. `restart_needed` retourné. GUI : carte « Mise à jour » dans Réglages (`GET /api/update/status`, `POST /api/update/check`, `POST /api/update`) |
+| `build` | `devdash build [--onefile] [--no-gui] [--no-console]` | **construit l’exécutable autonome** (`dist/devdash/devdash.exe`, lançable sans commande — double-clic) via PyInstaller (requis : `pip install -e ".[build]"`, build 100 % local sans réseau) ; `--onefile` = fichier unique, `--no-gui` = exe CLI seul, `--no-console` = exe fenêtré. GUI : carte « Exécutable (.exe) » dans Réglages (`POST /api/build/run`, `GET /api/build/status`). Exe non signé : SmartScreen « Exécuter quand même » au premier lancement, et AppLocker/WDAC peut bloquer un exe non signé — signer avec `scripts/sign_exe.ps1` |
 
 ### Conventions de commits Git
 
@@ -207,7 +229,27 @@ Les messages sont reliés aux tâches/features par des regex configurables
 - `feat(dash): ...` → feature « dash »
 
 Les commits non reconnus restent listés à part (`git log --unparsed`).
-**Aucune opération d'écriture Git** : DevDash ne fait que `git log` / `git rev-parse`.
+
+**Onglet Git façon GitHub Desktop** (tout en lecture seule) : sélecteur de
+branches locales (en choisir une affiche ses derniers commits), panneau
+« Fichiers modifiés » (`git status --porcelain` + `diff --numstat` : badge de
+statut + compteurs +/−, clic = diff du fichier), bouton « 📂 Ouvrir le dépôt »
+dans l'explorateur, terminal `git$` pour commandes en liste blanche
+(`POST /api/git/run`, `/api/git/changes`, `/api/git/branches`, `/api/git/open`).
+Boutons « ⇩ Fetch » / « ⇩ Pull » (`POST /api/git/remote` : liste blanche `fetch`,
+`pull --ff-only`, `remote -v` — **toute écriture distante est refusée**, règle du
+projet) et, dans le panneau « Fichiers modifiés », des cases à cocher + « Tout » +
+« Diff sélection » (`POST /api/git/diff` : diff combiné en lecture seule des
+fichiers choisis, chemins validés et confinés au dépôt, option « index » pour
+`--cached`) ; la liste se rafraîchit en temps réel (watcher git + polling 1,5 s).
+**Détection de ticket lié** : quand des changements non commités existent,
+`/api/git/changes` renvoie `linked_task` (session en cours sur la tâche en
+priorité, sinon dernier commit parsé `#42`/`task-42:`) et la GUI affiche une
+bannière « 🧩 changements liés à #N » avec « ✔ Marquer #N terminée » (**double
+clic de confirmation** — la complétion n'est jamais affirmée sans un clic humain)
+plus « 🤖 Vérifier avec l'IA » (verdict lecture seule ; un verdict positif
+affiche le bouton « Approuver et marquer terminée »).
+**Aucune opération d'écriture Git** : DevDash ne fait que des commandes git en lecture seule (`git log` / `git rev-parse` pendant le sync ; `git run` applique une liste blanche lecture seule ; `git remote` n'accepte que `-v`, `git pull` exige `--ff-only` — voir ci-dessus).
 
 ### Synchronisation auto des commits (optionnel, avec Vibe)
 
@@ -257,15 +299,34 @@ supplémentaire) qui expose DevDash aux agents externes — lecture + actions s�
 
 **Vibe** — `~/.vibe/config.toml` (ou `.vibe/` du projet) :
 ```toml
-[mcp_servers.devdash]
+[[mcp_servers]]
+name = "devdash"
 command = "devdash"
 args = ["mcp"]
 ```
 
-Outils exposés (16) : `devdash_status`, `devdash_projects_list`, `devdash_tasks_list`,
-`devdash_task_add`, `devdash_task_set_status`, `devdash_task_verify`,
+**VS Code** (Copilot / Cline / toute extension compatible MCP) — `.vscode/mcp.json`
+dans le workspace :
+```json
+{ "servers": { "devdash": { "type": "stdio", "command": "python", "args": ["-m", "devdash", "mcp"] } } }
+```
+(ou l'exécutable venv/autonome en `command`). Une commande imprime/écrit le
+extrait pour chaque éditeur supporté :
+```bash
+devdash mcp-config vscode            # imprime le snippet pour .vscode/mcp.json
+devdash mcp-config vscode --write    # l'écrit/fusionne directement
+devdash mcp-config cursor|vibe|claude-desktop
+```
+
+Outils exposés (23) : `devdash_status`, `devdash_projects_list`, `devdash_projects_open` (ouvre le dossier connecté dans l'explorateur), `devdash_tasks_list`,
+`devdash_tasks_tree`, `devdash_context` (**bundle de contexte complet en un appel** —
+projet, progression, arborescence des tâches ouvertes avec rollups, devlog récent,
+snapshot git avec commits récents, stats du jour — pour qu'une IA dans VS Code suive
+le projet sans chaîner les appels), `devdash_task_add` (param `parent` = sous-tâche),
+`devdash_task_set_status`, `devdash_task_verify`,
 `devdash_session_start/stop`, `devdash_log_add/search`, `devdash_stats`,
-`devdash_git_status/log`, `devdash_features_list`, `devdash_ai_ask`,
+`devdash_git_status/log/run/remote` (`remote` = `fetch` / `pull --ff-only` / `remote -v`, écritures distantes refusées), `devdash_timeline` (fil d'activité), `devdash_report` (rapport markdown semaine/mois),
+`devdash_features_list`, `devdash_ai_ask`,
 `devdash_ai_suggest` (si l’IA est activée).
 Règle identique à partout : **aucune action destructive**, git en lecture seule,
 et une feature n’est **jamais** marquée terminée par l’agent.
@@ -288,6 +349,9 @@ Toutes les données tiennent dans **un seul dossier** :
   ne contient jamais de secret.
 - Plusieurs projets indépendants = plusieurs `DEVDASH_HOME`, ou un seul dossier
   avec plusieurs projets (changement de projet actif sans perte de progression).
+- **Sauvegarde auto** : au démarrage de la GUI, un zip `devdash-backup-*.zip` est
+  écrit tous les N jours (réglage « Données », 0 = désactivé) et seuls les K
+  derniers sont conservés.
 
 ### Schéma de données (résumé, voir `devdash/core/schema.sql`)
 
@@ -295,24 +359,51 @@ Toutes les données tiennent dans **un seul dossier** :
 |---|---|
 | `meta` | paires clé/valeur (ex: `active_project_id`) |
 | `projects` | slug, nom, description, moteur, couleur, statut, archivé |
-| `features` | nom, statut (`open/proposed/done/rejected`), source (manuel/IA), confiance, raisonnement, feedback, `validated_at` (posé **uniquement** par un humain) |
-| `tasks` | projet, parent (sous-tâches), titre, priorité, estimation, statut, tags (JSON), feature liée |
+| `features` | nom, statut (`open/proposed/done/rejected`), source (manuel/IA), confiance, raisonnement, feedback, `validated_at` (posé **uniquement** par un humain), `deleted_at` (corbeille) |
+| `tasks` | projet, parent (sous-tâches), titre, priorité, estimation, statut, tags (JSON), feature liée, `deleted_at` (corbeille) |
 | `sessions` | projet, tâche, kind (focus/pause/custom), début/fin, durée, note |
-| `log_entries` | devlog daté, lié à un projet/tâche, tags |
+| `log_entries` | devlog daté, lié à un projet/tâche, tags, `deleted_at` (corbeille) |
 | `git_links` / `git_commits` / `git_sync_state` | dépôts liés, commits importés (lecture seule), tâche/feature parsée, branche |
 | `events` | **bus d'événements append-only** : toute mutation y écrit une ligne ; la GUI interroge `events?since=` pour le temps réel |
+| `ai_messages` | historique du chat IA (persisté entre les sessions, élagué à 500 entrées) |
 
 ### Sécurité (en bref)
 
 - Serveur GUI **uniquement sur `127.0.0.1`**, avec vérification `Host` **et**
   `Origin` (anti-CSRF / anti-DNS-rebinding), `Content-Type: application/json`
   exigé sur les POST, plafond de body 1 Mo, `X-Content-Type-Options: nosniff`,
-  erreurs 500 génériques (les détails sont logués côté serveur uniquement).
+  **`X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` sur TOUTES les
+  réponses** (anti-clickjacking — un `<iframe>` de notre propre origine aurait
+  le bon Host), erreurs 500 génériques (les détails sont logués côté serveur uniquement).
 - Chemins statiques servis via `is_relative_to` (pas de traversée de dossier).
-- `devdash.db` et `config.json` en `chmod 600` (best effort sous Windows).
-- Git **strictement lecture seule** (`git log` / `git rev-parse`, subprocess en
-  liste, jamais de shell). Les regex de `commit_patterns` sont appliquées sur un
-  sujet tronqué (anti-ReDoS).
+- `devdash.db` et `config.json` en `chmod 600` (best effort sous Windows) ;
+  `config.json` est écrit **atomiquement** (tmp + `os.replace`) sous un lock
+  (serveur GUI threadé : pas de perte de mise à jour ni de fichier corrompu).
+- Fichiers temporaires (snapshot DB, zip de backup, export JSON) créés via
+  `tempfile.mkstemp` (`O_EXCL`) : nom imprévisible, pas de course symlink.
+- `git ignore` refuse d'écrire à travers un symlink `.gitignore`.
+- Détection « cloud » de l'IA par **résolution DNS** (`getaddrinfo` + `ipaddress
+  .is_loopback`) : `127.0.0.1.evil.com` n'est PAS classé local ; hôte
+  irrésolvable = traité comme distant (fail-closed).
+- Le contexte envoyé au modèle IA est délimité (`=== DÉBUT/FIN DES DONNÉES
+  PROJET ===`) avec instruction explicite de ne jamais suivre les instructions
+  qu'il contient (anti-prompt-injection ; les messages de commits viennent d'un
+  dépôt peut-être cloné d'une source hostile).
+- Sorties de subprocess (git, pip, sélecteur de dossier) décodées en **UTF-8**
+  (`errors="replace"`) : plus de mojibake selon la locale Windows (cp1252).
+- `sysopen.open_in_explorer` n'ouvre que des répertoires (défense en profondeur).
+- **Mise à jour** : `git pull --ff-only` + `pip install -e .` exécutent le code
+  de `origin` SANS vérification de signature — modèle de confiance explicite :
+  ne mettre à jour que depuis le dépôt officiel, sur un réseau de confiance.
+- Git **strictement lecture seule** : subprocess en liste, jamais de shell, les
+  métacaractères de shell ne peuvent rien exécuter ; `devdash git run` applique
+  en plus une liste blanche de sous-commandes + un filtrage **fail-closed** des
+  arguments (options longues refusées par préfixe dont `--no-index`/`--force*`/
+  `--git-dir=`, formes courtes attachées `-dfoo`/`-mfoo`, `reflog delete/expire`,
+  et tout chemin absolu), confine au dépôt lié (`-C`) et applique un timeout.
+  Les regex de `commit_patterns` sont appliquées sur un sujet tronqué (anti-ReDoS).
+- Champ `engine` d'un projet restreint à `[a-z0-9-]{1,40}` (rendu HTML échappé
+  côté GUI en plus) : pas de XSS stocké via un nom de moteur exotique.
 - Aucune clé API dans la DB, les événements, les logs ou les erreurs affichées.
 - Risque résiduel assumé : `git link` peut lire l'historique de n'importe quel
   dépôt local (c'est son rôle) — la GUI est protégée contre les appels
@@ -326,11 +417,25 @@ GUI (seul l'onglet **Réglages** reste visible pour configurer l'IA).
 Chaque fonction est activable individuellement via `ai_feature_flags`.
 
 **Depuis la GUI** : onglet ⚙ Réglages → choisir le provider dans la liste
-(local ou cloud), remplir modèle / URL / clé API / commande CLI, cocher les
-fonctions actives, puis **Tester la connexion** (envoi d'un simple « OK »,
-jamais de contexte projet) et **Enregistrer**. La clé saisie n'est jamais
-renvoyée au client (champ en écriture seule : laisser vide = garder la clé
-enregistrée).
+(local ou cloud), choisir le **modèle dans la liste de presets** du provider
+(ex. Claude Opus/Sonnet, GPT-5, Mistral Large… ; « Personnalisé… » pour tout
+autre), remplir URL / clé API / commande CLI si besoin, cocher les fonctions
+actives, puis **Tester la connexion** (envoi d'un simple « OK », jamais de
+contexte projet) et **Enregistrer**. La clé saisie n'est jamais renvoyée au
+client (champ en écriture seule : laisser vide = garder la clé enregistrée).
+
+**Providers** : Ollama / serveur local compatible OpenAI / CLI locale (rien ne
+quitte la machine) · Anthropic, Mistral, OpenAI (cloud, clé requise) ·
+**OpenRouter** (cloud, UNE seule clé pour tous les grands modèles — Claude,
+GPT, Gemini, DeepSeek, Qwen… — modèle à choisir dans la liste déroulante) ·
+endpoint custom compatible OpenAI. Le bandeau d'avertissement cloud s'affiche
+pour tout provider non-loopback.
+
+**Contexte envoyé au modèle** (borné par `ai_context_max_chars`) : projet actif +
+progression, tâches ouvertes, **arborescence des sous-tâches avec rollups**,
+session en cours, minutes du jour + streak, devlog récent, features
+ouvertes/proposées, et le snapshot git (branche, commits récents avec leurs
+tâches liées).
 
 **À la main** : `~/.devdash/config.json` (créé à la main ; `chmod 600` automatique à l'écriture) :
 
@@ -396,7 +501,7 @@ Toute l'interface (CLI **et** GUI) est traduite. Une seule option dans
   (`todo`, `high`, `unity`…), les clés de `config.json` et la sortie `--json`
   restent en anglais et stables pour vos scripts.
 - Le catalogue complet vit dans `devdash/core/i18n.py` (un dictionnaire par
-  langue, ~350 clés) : ajouter une langue = ajouter un dictionnaire + une entrée
+  langue, ~970 clés) : ajouter une langue = ajouter un dictionnaire + une entrée
   dans `SUPPORTED_LANGS`.
 
 Règles de sécurité : l'IA ne fait **jamais** d'action destructive ou écrite
@@ -413,7 +518,7 @@ est enregistré comme feedback).
 devdash/
 ├── core/                 # logique métier, stdlib uniquement, testable seule
 │   ├── db.py             #   connexion SQLite, WAL, migrations de schéma
-│   ├── schema.sql        #   schéma (v4) documenté
+│   ├── schema.sql        #   schéma (v10) documenté
 │   ├── models.py         #   dataclasses Project/Task/Feature/Session/...
 │   ├── config.py         #   DEVDASH_HOME + config.json (séparé des données)
 │   ├── events.py         #   bus d'événements append-only (temps réel)
@@ -428,11 +533,13 @@ devdash/
 │   └── commands/         #   projects/task/session/log/git/feature/ai/stats/demo/gui/status
 ├── gui/                  # fenêtre native PyWebView + serveur HTTP 127.0.0.1 stdlib
 │   ├── server.py         #   routes API GET/POST + watcher Git en arrière-plan
-│   ├── api.py            #   tous les endpoints (mêmes fonctions core que le CLI)
+│   ├── api.py            #   façade Api = mixins api_*.py (mêmes fonctions core que le CLI)
+│   ├── api_common.py     #   ApiError + helpers partagés
+│   └── api_<domaine>.py   #   endpoints par domaine (projects, tasks, git, ai…)
 │   ├── desktop.py        #   run(): fenêtre native, ou --browser
 │   └── static/           #   index.html / app.js / styles.css (thème sombre)
 │                         #   + vendor/chart.umd.min.js (Chart.js embarqué, hors-ligne)
-└── tests/                # pytest (228+ tests)
+└── tests/                # pytest (460+ tests)
 ```
 
 **Pourquoi Python** : stdlib riche (sqlite3, http.server, json, dataclasses),
@@ -451,7 +558,7 @@ WebView2 système (~30-60 Mo), bien moins qu'une app Electron.
 
 ```bash
 pip install -e ".[test]"
-PYTHONPATH=. python -m pytest -q   # 228+ tests : core, CLI, sessions, logs, git, GUI,
+PYTHONPATH=. python -m pytest -q   # 460+ tests : core, CLI, sessions, logs, git, GUI,
                                    # features, IA, stats, status, review, sécurité
 ```
 

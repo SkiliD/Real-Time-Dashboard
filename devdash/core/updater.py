@@ -34,6 +34,7 @@ def _git(repo: Path, *args: str, timeout: int = _GIT_TIMEOUT) -> tuple[int, str]
         r = subprocess.run(
             ["git", "-C", str(repo), *args],
             capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
         )
         return r.returncode, (r.stdout + r.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -93,11 +94,16 @@ def check_for_updates(repo: Path | None = None, fetch: bool = True) -> dict:
     }
 
 
-# TODO: also rebuild the .exe automatically after an update? maybe later
+# (open question moved to backlog.md: rebuild the .exe automatically after an update?)
 def update(repo: Path | None = None, reinstall: bool = True) -> dict:
     """Apply the update. Git mode: ff-only pull (aborted when the tree is dirty)
     + `pip install -e .` to refresh dependencies. Other modes: guidance only.
-    Always returns a structured dict; `restart_needed` is True on success."""
+    Always returns a structured dict; `restart_needed` is True on success.
+
+    TRUST MODEL (explicit, see docs): the pulled code is executed WITHOUT
+    signature verification — only update from the official repository over a
+    trusted network. The dirty-tree check is advisory (TOCTOU window between
+    `status` and `pull`); `--ff-only` still guarantees no history rewrite."""
     repo = repo or package_repo()
     is_git = repo is not None and (repo / ".git").exists()
     mode = "exe" if getattr(sys, "frozen", False) else ("git" if is_git else "pip")
@@ -125,6 +131,7 @@ def update(repo: Path | None = None, reinstall: bool = True) -> dict:
             r = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-q", "-e", str(repo)],
                 capture_output=True, text=True, timeout=_PIP_TIMEOUT,
+                encoding="utf-8", errors="replace",
             )
         except (OSError, subprocess.TimeoutExpired) as e:
             r = subprocess.CompletedProcess([], 1, stderr=str(e))

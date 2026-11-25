@@ -36,7 +36,11 @@ def project(conn):
 
 def _session(conn, project_id, task_id, days_ago: int, minutes: float) -> None:
     s = sessions.start(conn, project_id=project_id, task_id=task_id)
-    start = datetime.now(timezone.utc) - timedelta(days=days_ago, minutes=minutes)
+    # Anchor at the START of the local day `days_ago` (+1 min): "now - delta"
+    # crosses midnight just after 00:00 and makes today/period assertions flaky.
+    from devdash.core.models import day_start_utc
+
+    start = datetime.fromisoformat(day_start_utc(days_ago)) + timedelta(minutes=1)
     end = start + timedelta(minutes=minutes)
     conn.execute(
         "UPDATE sessions SET started_at=?, ended_at=?, duration_min=? WHERE id=?",

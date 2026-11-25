@@ -1,6 +1,5 @@
-"""work sessions and durations
+"""Work sessions: start/stop, current running session, durations and streaks.
 
-If it breaks, the tests will say so.
 """
 
 from __future__ import annotations
@@ -8,13 +7,17 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from . import events, projects
+from . import events, i18n, projects
 from .models import Session, day_start_utc, now_iso, to_local_date
 
 VALID_KINDS = ("focus", "pause", "custom")
 
 # hard cap so a runaway query can never materialize the whole table in RAM
 MAX_LIST_ROWS = 100_000
+MAX_MINUTES_PER_DAY = 24 * 60  # session duration cap (1 min .. 24 h)
+
+#: active_days()/streak only look back this far (a streak > 1 year is not meaningful)
+STREAK_WINDOW_DAYS = 366
 
 
 def _parse(ts: str) -> datetime:
@@ -55,20 +58,20 @@ def start(
     minutes: int | None = None,
 ) -> Session:
     if kind not in VALID_KINDS:
-        raise ValueError(f"invalid kind {kind!r}, expected one of {VALID_KINDS}")
-    if minutes is not None and (isinstance(minutes, bool) or not isinstance(minutes, int) or not (1 <= minutes <= 24 * 60)):
-        raise ValueError("minutes must be an integer between 1 and 1440")
+        raise ValueError(i18n.tr("err.kind_invalid", kind=kind, items=VALID_KINDS))
+    if minutes is not None and (isinstance(minutes, bool) or not isinstance(minutes, int) or not (1 <= minutes <= MAX_MINUTES_PER_DAY)):
+        raise ValueError(i18n.tr("err.minutes_range", min=1, max=MAX_MINUTES_PER_DAY))
     if project_id is None:
         active = projects.get_active(conn)
         if active is None:
-            raise KeyError("no active project (set one with 'devdash projects set-active')")
+            raise KeyError(i18n.tr("err.no_active_project"))
         project_id = active.id
     elif projects.get(conn, project_id) is None:
-        raise KeyError(f"no project with id {project_id}")
+        raise KeyError(i18n.tr("err.no_project_id", id=project_id))
     if task_id is not None:
         from . import tasks as _tasks
         if _tasks.get(conn, task_id) is None:
-            raise KeyError(f"no task #{task_id}")
+            raise KeyError(i18n.tr("err.no_task", id=task_id))
     now = now_iso()
     # Atomic: stop ANY still-running sessions (normally at most one) and insert
     # the new one in a single IMMEDIATE transaction — BEGIN IMMEDIATE takes the
@@ -112,13 +115,13 @@ def stop(conn: sqlite3.Connection, session_id: int | None = None, note: str = ""
     if session_id is None:
         running = current(conn)
         if running is None:
-            raise KeyError("no running session")
+            raise KeyError(i18n.tr("err.no_running_session"))
         session_id = running.id
     session = get(conn, session_id)
     if session is None:
-        raise KeyError(f"no session #{session_id}")
+        raise KeyError(i18n.tr("err.no_session", id=session_id))
     if session.ended_at is not None:
-        raise ValueError(f"session #{session_id} is already stopped")
+        raise ValueError(i18n.tr("err.session_stopped", id=session_id))
     ended = now_iso()
     duration = max(0.0, round((_parse(ended) - _parse(session.started_at)).total_seconds() / 60, 2))
     # Idempotent stop: the WHERE ended_at IS NULL guard makes a concurrent second
@@ -129,7 +132,7 @@ def stop(conn: sqlite3.Connection, session_id: int | None = None, note: str = ""
         (ended, duration, note or session.note, session_id),
     )
     if cur.rowcount == 0:
-        raise ValueError(f"session #{session_id} is already stopped")
+        raise ValueError(i18n.tr("err.session_stopped", id=session_id))
     conn.commit()
     session = get(conn, session_id)
     assert session is not None
@@ -196,9 +199,12 @@ def total_min(
 
 
 def active_days(conn: sqlite3.Connection, project_id: int | None = None) -> set[str]:
-    """Set of LOCAL calendar dates (YYYY-MM-DD) with at least one stopped session."""
-    clauses = ["ended_at IS NOT NULL"]
-    values: list = []
+    """Set of LOCAL calendar dates (YYYY-MM-DD) with at least one stopped session.
+    Bounded to the last STREAK_WINDOW_DAYS days: a streak beyond that is not
+    meaningful, and it keeps the query off the whole history on every poll."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=STREAK_WINDOW_DAYS)).isoformat(timespec="seconds")
+    clauses = ["ended_at IS NOT NULL", "started_at >= ?"]
+    values: list = [cutoff]
     if project_id is not None:
         clauses.append("project_id = ?")
         values.append(project_id)

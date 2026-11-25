@@ -8,8 +8,9 @@ import json
 import re
 import sqlite3
 import unicodedata
+from pathlib import Path
 
-from . import events
+from . import events, i18n
 from .models import Project, check_text, now_iso
 
 VALID_STATUSES = ("idea", "design", "prototype", "development", "beta", "done", "paused")
@@ -35,16 +36,52 @@ def _unique_slug(conn: sqlite3.Connection, base: str) -> str:
 
 
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+_ENGINE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+
+
+def _validate_engine(engine) -> str:
+    """Engine is a free label, but it is rendered in the GUI (sidebar/header) and
+    sent to the AI context: restrict it to a safe slug charset, lowercased —
+    anything else (HTML, spaces, punctuation) is refused."""
+    if not isinstance(engine, str):
+        raise ValueError(i18n.tr("err.engine_type"))
+    e = engine.strip().lower()
+    if not _ENGINE_RE.match(e):
+        raise ValueError(i18n.tr("err.engine_format"))
+    return e
 
 MAX_LANGUAGES = 12
 MAX_LANG_LEN = 24
+MAX_PATH_LEN = 4096
+
+
+def _validate_path(path) -> str:
+    """Connected project folder: empty = none; otherwise it must be an existing
+    directory and is stored resolved (absolute). The path is only ever used to
+    open the OS file explorer — never followed anywhere else."""
+    if path is None:
+        return ""
+    if not isinstance(path, str):
+        raise ValueError(i18n.tr("err.path_type"))
+    raw = path.strip()
+    if not raw:
+        return ""
+    if len(raw) > MAX_PATH_LEN:
+        raise ValueError(i18n.tr("err.path_too_long", max=MAX_PATH_LEN))
+    p = Path(raw).expanduser()
+    if not p.is_dir():
+        raise ValueError(i18n.tr("err.not_a_dir", path=raw))
+    try:
+        return str(p.resolve())
+    except OSError:
+        return str(p)
 
 
 def _validate_color(color: str) -> str:
     """Colors end up in a CSS `style` attribute in the GUI: only allow #rrggbb,
     anything else would be an injection vector."""
     if not _HEX_COLOR.match(color):
-        raise ValueError(f"invalid color {color!r}: expected #rrggbb")
+        raise ValueError(i18n.tr("err.color_invalid", color=color))
     return color.lower()
 
 
@@ -53,20 +90,20 @@ def _validate_languages(languages) -> list[str]:
     deduplicated, bounded (they are displayed in the UI and sent in the AI context)."""
     # NB: this module defines its own list() function, which shadows the builtin
     if not isinstance(languages, (builtins.list, builtins.tuple)):
-        raise ValueError("languages must be a list of strings")
+        raise ValueError(i18n.tr("err.languages_type"))
     out: list[str] = []
     for lang in languages:
         if not isinstance(lang, str):
-            raise ValueError("languages must be a list of strings")
+            raise ValueError(i18n.tr("err.languages_type"))
         lang = lang.strip().lower().replace(" ", "-")
         if not lang:
             continue
         if len(lang) > MAX_LANG_LEN:
-            raise ValueError(f"language name too long: {lang!r} (max {MAX_LANG_LEN} chars)")
+            raise ValueError(i18n.tr("err.lang_too_long", lang=lang, max=MAX_LANG_LEN))
         if lang not in out:
             out.append(lang)
     if len(out) > MAX_LANGUAGES:
-        raise ValueError(f"too many languages (max {MAX_LANGUAGES})")
+        raise ValueError(i18n.tr("err.too_many_langs", max=MAX_LANGUAGES))
     return out
 
 
@@ -78,17 +115,18 @@ def create(
     color: str = "#8a8f98",
     status: str = "idea",
     languages: list[str] | None = None,
+    path: str = "",
 ) -> Project:
     if not isinstance(name, str) or not name.strip():
-        raise ValueError("project name is required (non-empty)")
+        raise ValueError(i18n.tr("err.project_name_required"))
     name = name.strip()
     description = check_text(description or "", "description")
     if status not in VALID_STATUSES:
-        raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
-    if not isinstance(engine, str) or not engine.strip() or len(engine) > 40:
-        raise ValueError("engine must be a non-empty string of at most 40 characters")
+        raise ValueError(i18n.tr("err.status_invalid", status=status, items=VALID_STATUSES))
+    engine = _validate_engine(engine)
     color = _validate_color(color)
     langs = _validate_languages(languages or [])
+    folder = _validate_path(path)
     now = now_iso()
     slug = _unique_slug(conn, _slugify(name))
     for _attempt in range(5):  # bounded retry on a slug race
@@ -96,9 +134,9 @@ def create(
             with conn:  # row + event in one transaction
                 cur = conn.execute(
                     "INSERT INTO projects(slug, name, description, engine, color, languages, "
-                    "status, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
-                    (slug, name, description, engine.lower(), color,
-                     json.dumps(langs), status, now, now),
+                    "path, status, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    (slug, name, description, engine, color,
+                     json.dumps(langs), folder, status, now, now),
                 )
                 project = get(conn, cur.lastrowid)
                 assert project is not None
@@ -109,7 +147,7 @@ def create(
             conn.rollback()
             slug = _unique_slug(conn, _slugify(name))
     else:
-        raise ValueError(f"could not allocate a unique slug for {name!r}")
+        raise ValueError(i18n.tr("err.slug_unavailable", name=name))
     return project
 
 
@@ -138,7 +176,7 @@ def set_active(conn: sqlite3.Connection, ref: int | str) -> Project:
     """Point the focus at another project. Nothing else is modified."""
     project = get(conn, ref)
     if project is None:
-        raise KeyError(f"no project matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_project", ref=ref))
     with conn:
         conn.execute(
             "INSERT INTO meta(key, value) VALUES ('active_project_id', ?) "
@@ -153,7 +191,12 @@ def get_active_id(conn: sqlite3.Connection) -> int | None:
     row = conn.execute(
         "SELECT value FROM meta WHERE key = 'active_project_id'"
     ).fetchone()
-    return int(row["value"]) if row else None
+    if not row:
+        return None
+    try:  # a hand-edited/corrupted meta value must not crash the GUI with a 500
+        return int(row["value"])
+    except (TypeError, ValueError):
+        return None
 
 
 def get_active(conn: sqlite3.Connection) -> Project | None:
@@ -172,30 +215,33 @@ def update(
     status: str | None = None,
     archived: bool | None = None,
     languages: list[str] | None = None,
+    path: str | None = None,
 ) -> Project:
     project = get(conn, ref)
     if project is None:
-        raise KeyError(f"no project matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_project", ref=ref))
     if status is not None and status not in VALID_STATUSES:
-        raise ValueError(f"invalid status {status!r}, expected one of {VALID_STATUSES}")
+        raise ValueError(i18n.tr("err.status_invalid", status=status, items=VALID_STATUSES))
     if color is not None:
         color = _validate_color(color)
     if description is not None:
         description = check_text(description, "description")
-    if engine is not None and (not isinstance(engine, str) or not engine.strip() or len(engine) > 40):
-        raise ValueError("engine must be a non-empty string of at most 40 characters")
+    if engine is not None:
+        engine = _validate_engine(engine)
     if name is not None and (not isinstance(name, str) or not name.strip()):
-        raise ValueError("project name cannot be empty")
+        raise ValueError(i18n.tr("err.project_name_required"))
     fields, values = [], []
     for column, value in (
         ("name", name.strip() if isinstance(name, str) else name),
         ("description", description),
-        ("engine", engine.lower() if engine else None),
+        ("engine", engine),
         ("color", color),
         ("status", status),
         ("archived", None if archived is None else int(archived)),
         # None = "no change"; an explicit list (even empty) replaces the languages
         ("languages", None if languages is None else json.dumps(_validate_languages(languages))),
+        # None = "no change"; an explicit string (even empty) sets/clears the folder
+        ("path", None if path is None else _validate_path(path)),
     ):
         if value is not None:
             fields.append(f"{column} = ?")
@@ -228,7 +274,7 @@ def delete(conn: sqlite3.Connection, ref: int | str) -> Project:
     """
     project = get(conn, ref)
     if project is None:
-        raise KeyError(f"no project matching {ref!r}")
+        raise KeyError(i18n.tr("err.no_project", ref=ref))
     with conn:  # one transaction: bus cleanup + row delete + active pointer
         conn.execute(
             "DELETE FROM events WHERE entity = 'project' AND entity_id = ?",

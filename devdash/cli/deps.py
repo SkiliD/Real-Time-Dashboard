@@ -9,7 +9,7 @@ import sqlite3
 
 import typer
 
-from devdash.core import config, db
+from devdash.core import config, db, events
 from devdash.core.i18n import tr
 from devdash.core.models import MAX_TEXT_LEN
 
@@ -34,6 +34,7 @@ def get_conn(ctx: typer.Context) -> sqlite3.Connection:
     home = config.devdash_home()
     conn = db.connect(config.db_path(home))
     db.init_db(conn)
+    events.prune(conn)  # bound the append-only event bus even if the GUI never runs
     ctx.call_on_close(conn.close)
     return conn
 

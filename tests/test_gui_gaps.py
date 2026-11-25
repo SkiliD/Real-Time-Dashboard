@@ -102,10 +102,16 @@ def test_core_logs_delete(home):
     db.init_db(c)
     p = proj.create(c, "Game")
     e = logs.add(c, "note", project_id=p.id)
-    logs.delete(c, e.id)
+    logs.delete(c, e.id)  # soft by default: row stays, flagged, restorable
+    assert logs.get(c, e.id).deleted_at is not None
+    assert logs.list(c, project_id=p.id) == []
+    assert len(logs.list(c, project_id=p.id, trash=True)) == 1
+    logs.restore(c, e.id)
+    assert logs.get(c, e.id).deleted_at is None
+    logs.delete(c, e.id, permanent=True)
     assert logs.get(c, e.id) is None
     with pytest.raises(KeyError):
-        logs.delete(c, e.id)
+        logs.delete(c, e.id, permanent=True)
     c.close()
 
 
@@ -141,7 +147,8 @@ def test_demo_seed_guard_and_force(api):
         api.demo_seed({})
     assert e.value.status == 400
     r = api.demo_seed({"force": True})
-    assert r.get("projects") == 2  # demo creates Aether Vale + Portfolio Web
+    # counts are computed from the DB (not hardcoded): fixture project + 2 demo projects
+    assert r.get("projects") == 3 and r.get("tasks") >= 8
     assert api.projects()["projects"].__len__() >= 3
 
 
@@ -175,7 +182,7 @@ def test_http_gap_endpoints(home):
         assert d["deleted"] == e["id"]
         # demo seed over HTTP (empty-ish db has 1 project -> force)
         r = json.loads(urllib.request.urlopen(_post(base, "/api/demo/seed", {"force": True})).read())
-        assert r.get("projects") == 2
+        assert r.get("projects") == 3 and r.get("sessions") >= 6  # computed, not hardcoded
         # export over HTTP
         x = json.loads(urllib.request.urlopen(_post(base, "/api/export", {})).read())
         assert Path(x["path"]).exists()

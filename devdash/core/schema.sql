@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS projects (
     engine      TEXT NOT NULL DEFAULT 'other', -- unity|unreal|godot|web|other (free label)
     color       TEXT NOT NULL DEFAULT '#8a8f98', -- identity color (hex)
     languages   TEXT NOT NULL DEFAULT '[]',    -- JSON array: programming languages used (csharp, gdscript, ...)
+    path        TEXT NOT NULL DEFAULT '',      -- connected project folder (empty = none, set via `projects connect`)
     status      TEXT NOT NULL DEFAULT 'idea',  -- idea|design|prototype|development|beta|done|paused
     archived    INTEGER NOT NULL DEFAULT 0,   -- soft hide, never hard delete
     created_at  TEXT NOT NULL,
@@ -31,7 +32,8 @@ CREATE TABLE IF NOT EXISTS features (
     reasoning    TEXT,                          -- AI verdict reasoning, NULL if manual
     feedback     TEXT,                          -- user feedback on a rejected proposal
     created_at   TEXT NOT NULL,
-    validated_at TEXT                           -- set ONLY by a human decision
+    validated_at TEXT,                          -- set ONLY by a human decision
+    deleted_at   TEXT                           -- soft delete (corbeille); NULL = visible
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -48,7 +50,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     order_index  INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    deleted_at   TEXT                           -- soft delete (corbeille); NULL = visible
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
@@ -69,6 +72,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_task    ON sessions(task_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_project_started ON sessions(project_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_project_task ON sessions(project_id, task_id);
+-- partial index: the running-session lookup (ended_at IS NULL) is O(1) instead of a full scan
+CREATE INDEX IF NOT EXISTS idx_sessions_running ON sessions(id) WHERE ended_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS log_entries (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,10 +83,12 @@ CREATE TABLE IF NOT EXISTS log_entries (
     task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
     content    TEXT NOT NULL,
     tags       TEXT NOT NULL DEFAULT '[]',      -- JSON array
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    deleted_at TEXT                           -- soft delete (corbeille); NULL = visible
 );
 CREATE INDEX IF NOT EXISTS idx_log_project ON log_entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_log_task    ON log_entries(task_id);
+CREATE INDEX IF NOT EXISTS idx_log_project_created ON log_entries(project_id, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS git_links (
     project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -100,6 +109,10 @@ CREATE TABLE IF NOT EXISTS git_commits (
 );
 CREATE INDEX IF NOT EXISTS idx_commits_repo  ON git_commits(repo_path);
 CREATE INDEX IF NOT EXISTS idx_commits_task  ON git_commits(parsed_task_id);
+-- committed_at is normalized UTC ISO (+00:00): lexicographic = chronological
+CREATE INDEX IF NOT EXISTS idx_commits_repo_date ON git_commits(repo_path, committed_at);
+CREATE INDEX IF NOT EXISTS idx_commits_date ON git_commits(committed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed_at) WHERE status = 'done' AND completed_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS git_sync_state (
     repo_path      TEXT PRIMARY KEY,
@@ -118,3 +131,15 @@ CREATE TABLE IF NOT EXISTS events (
     payload    TEXT NOT NULL DEFAULT '{}',      -- JSON
     created_at TEXT NOT NULL
 );
+
+-- Persisted AI chat history: one row per message, per project. Only written by
+-- /api/ai/ask (user question + assistant answer); cleared via /api/ai/chat/clear.
+CREATE TABLE IF NOT EXISTS ai_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    role       TEXT NOT NULL,                -- user | assistant
+    content    TEXT NOT NULL,
+    meta       TEXT,                         -- "provider / model [/ cloud]"
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_project ON ai_messages(project_id, id);

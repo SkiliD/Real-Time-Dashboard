@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import struct
 import subprocess
 import sys
 import tomllib
@@ -36,6 +37,24 @@ def test_pyinstaller_spec_is_wired():
     assert '"devdash/__main__.py"' in spec or "'devdash/__main__.py'" in spec
     assert "collect_data_files" in spec  # schema.sql bundled into the exe
     assert "upx=False" in spec
+
+
+def test_gui_icon_is_package_data_and_valid_ico():
+    # the window/taskbar icon must ship inside installed wheels
+    res = importlib.resources.files("devdash.gui").joinpath("icon.ico")
+    assert res.is_file()
+    raw = res.read_bytes()
+    reserved, typ, count = struct.unpack("<HHH", raw[:6])
+    assert reserved == 0 and typ == 1 and count >= 4, "not a valid multi-size ICO"
+    assert len(raw) > 5000
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "icon.ico" in data["tool"]["setuptools"]["package-data"]["devdash.gui"]
+
+
+def test_spec_embeds_exe_icon():
+    # running the frozen devdash.exe must show the app icon in the taskbar too
+    spec = (ROOT / "devdash.spec").read_text(encoding="utf-8")
+    assert "icon.ico" in spec and 'exe_meta["icon"]' in spec
 
 
 def test_spec_is_av_friendly():
@@ -95,3 +114,19 @@ def test_python_m_devDash_entrypoint_works():
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("devdash")
+
+
+def test_version_is_a_coherent_beta_prerelease():
+    # one source of truth: pyproject == devdash.__version__; a beta must be a
+    # PEP 440 pre-release (e.g. 0.9.0b1 = "beta 1 of 0.9.0", sorts before 0.9.0)
+    from packaging.version import Version
+    import devdash
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    v = Version(devdash.__version__)
+    assert pyproject["project"]["version"] == devdash.__version__
+    assert v.is_prerelease and v.base_version == "0.9.0" and v.pre == ("b", 1)
+    # Windows metadata: FileVersion is 4 numeric parts (0.9.0.1), ProductVersion carries the label
+    vi = (ROOT / "scripts" / "version_info.txt").read_text(encoding="utf-8")
+    assert "StringStruct('FileVersion', '0.9.0.1')" in vi
+    assert "StringStruct('ProductVersion', '0.9.0-beta.1')" in vi
+    assert 'assemblyIdentity version="0.9.0.1"' in (ROOT / "scripts" / "app.manifest").read_text(encoding="utf-8")

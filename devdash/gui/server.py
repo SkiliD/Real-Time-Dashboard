@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from devdash import __version__
 from devdash.core import i18n
 
 from .api import Api, ApiError
@@ -18,11 +19,29 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Max accepted POST body size (JSON payloads are tiny; 1 MB is generous)
 MAX_BODY_BYTES = 1_000_000
 
+#: Security headers sent on EVERY response. The Host/Origin checks below are
+#: bypassable from an <iframe> of our own origin (the framed page has the right
+#: Host), so framing is denied outright. The CSP keeps scripts/styles same-origin;
+#: the only inline script is the tiny static theme bootstrap in index.html,
+#: pinned by its sha256 hash (test_window_chrome recomputes it from the HTML) —
+#: no 'unsafe-inline' for scripts. style-src keeps 'unsafe-inline' because
+#: app.js sets element.style.* attributes. The real XSS defense is escaping
+#: user data (escapeHtml); this is the second layer.
+_THEME_SCRIPT_SHA256 = "sha256-5qWYpnyA9FXGKQ+WVN2K/GGWckZ6k0nErjAERGkWGRI="
+SECURITY_HEADERS = (
+    ("X-Frame-Options", "DENY"),
+    ("Content-Security-Policy",
+     "default-src 'self'; script-src 'self' '" + _THEME_SCRIPT_SHA256 + "'; "
+     "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+     "connect-src 'self'; frame-ancestors 'none'"),
+)
+
 GET_ROUTES = {
     "/api/i18n": lambda api, q: {"lang": i18n.get_lang(), "messages": i18n.messages()},
     "/api/projects": lambda api, q: api.projects(),
     "/api/detect": lambda api, q: api.detect_path(q),
     "/api/tasks": lambda api, q: api.tasks(q),
+    "/api/tasks/tree": lambda api, q: api.tasks_tree(q),
     "/api/tags": lambda api, q: api.tags(q),
     "/api/status": lambda api, q: api.status(),
     "/api/events": lambda api, q: api.events_since(q.get("since", "0")),
@@ -38,11 +57,16 @@ GET_ROUTES = {
     "/api/features/show": lambda api, q: api.features_show(q),
     "/api/ai/status": lambda api, q: api.ai_status(),
     "/api/ai/context": lambda api, q: api.ai_context(),
+    "/api/ai/chat": lambda api, q: api.ai_chat(q),
     "/api/ai/providers": lambda api, q: api.ai_providers(),
     "/api/ai/config": lambda api, q: api.ai_config_get(),
     "/api/settings": lambda api, q: api.settings_get(),
+    "/api/tour": lambda api, q: api.tour_get(),
     "/api/update/status": lambda api, q: api.update_status(),
+    "/api/build/status": lambda api, q: api.build_status(),
     "/api/stats": lambda api, q: api.stats_overview(q),  # filters: ?project=all|<slug>&days=30&group=week
+    "/api/stats/estimates": lambda api, q: api.stats_estimates(q),  # estimate vs actual minutes per task
+    "/api/timeline": lambda api, q: api.timeline(q),  # activity feed: ?project=&type=&limit=
 }
 
 POST_ROUTES = {
@@ -51,20 +75,29 @@ POST_ROUTES = {
     "/api/projects/set-active": lambda api, body: api.projects_set_active(body),
     "/api/projects/update": lambda api, body: api.projects_update(body),
     "/api/projects/delete": lambda api, body: api.projects_delete(body),
+    "/api/projects/open": lambda api, body: api.projects_open(body),  # open connected folder in OS explorer
     "/api/tasks/add": lambda api, body: api.tasks_add(body),
     "/api/tasks/status": lambda api, body: api.tasks_set_status(body),
     "/api/tasks/update": lambda api, body: api.tasks_update(body),
     "/api/tasks/delete": lambda api, body: api.tasks_delete(body),
+    "/api/tasks/restore": lambda api, body: api.tasks_restore(body),
     "/api/open-home": lambda api, body: api.open_home(body),
     "/api/session/start": lambda api, body: api.session_start(body),
     "/api/session/stop": lambda api, body: api.session_stop(body),
     "/api/logs/add": lambda api, body: api.logs_add(body),
     "/api/logs/update": lambda api, body: api.logs_update(body),
     "/api/logs/delete": lambda api, body: api.logs_delete(body),
+    "/api/logs/restore": lambda api, body: api.logs_restore(body),
     "/api/git/link": lambda api, body: api.git_link(body),
     "/api/git/unlink": lambda api, body: api.git_unlink(body),
     "/api/git/sync": lambda api, body: api.git_sync(body),
     "/api/git/ignore": lambda api, body: api.git_ignore(body),
+    "/api/git/run": lambda api, body: api.git_run(body),
+    "/api/git/remote": lambda api, body: api.git_remote(body),   # fetch / pull --ff-only (remote read)
+    "/api/git/diff": lambda api, body: api.git_diff(body),       # combined diff of selected files
+    "/api/git/changes": lambda api, body: api.git_changes(body),
+    "/api/git/branches": lambda api, body: api.git_branches(body),
+    "/api/git/open": lambda api, body: api.git_open(body),
     "/api/features/add": lambda api, body: api.features_add(body),
     "/api/features/attach": lambda api, body: api.features_attach(body),
     "/api/features/done": lambda api, body: api.features_done(body),
@@ -75,7 +108,9 @@ POST_ROUTES = {
     "/api/features/detach": lambda api, body: api.features_detach(body),
     "/api/features/update": lambda api, body: api.features_update(body),
     "/api/features/delete": lambda api, body: api.features_delete(body),
+    "/api/features/restore": lambda api, body: api.features_restore(body),
     "/api/ai/ask": lambda api, body: api.ai_ask(body),
+    "/api/ai/chat/clear": lambda api, body: api.ai_chat_clear(body),
     "/api/ai/summarize": lambda api, body: api.ai_summarize(body),
     "/api/ai/plan": lambda api, body: api.ai_plan(body),
     "/api/ai/suggest": lambda api, body: api.ai_suggest(body),
@@ -85,19 +120,22 @@ POST_ROUTES = {
     "/api/ai/config": lambda api, body: api.ai_config_save(body),
     "/api/ai/test": lambda api, body: api.ai_config_test(body),
     "/api/settings": lambda api, body: api.settings_save(body),
+    "/api/tour": lambda api, body: api.tour_post(body),
     "/api/backup": lambda api, body: api.backup_now(body),
     "/api/export": lambda api, body: api.export_now(body),
     "/api/demo/seed": lambda api, body: api.demo_seed(body),
     "/api/fs/pick": lambda api, body: api.fs_pick_directory(body),
     "/api/update/check": lambda api, body: api.update_check(body),
     "/api/update": lambda api, body: api.update_now(body),
+    "/api/build/run": lambda api, body: api.build_run(body),
+    "/api/report": lambda api, body: api.report(body),  # POST: markdown week/month report (ai=true optional)
 }
 
 
 class Handler(BaseHTTPRequestHandler):
     api: Api
     static_dir: Path
-    server_version = "DevDash/0.1"
+    server_version = f"DevDash/{__version__}"
 
     def log_message(self, *args):  # keep the console clean
         pass
@@ -136,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in SECURITY_HEADERS:
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(payload)
 
@@ -146,6 +186,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in SECURITY_HEADERS:
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(payload)
 
@@ -234,12 +276,15 @@ def make_server(port: int = 0, home: Path | None = None, static_dir: Path | None
     """Build (but do not start) the GUI server. port=0 picks a free port."""
     api = Api(home=home)
 
-    class _Handler(Handler):
+    try:  # auto-backup on GUI start (config auto_backup_days, 0 = off) — never block startup
+        from devdash.core.backup import maybe_auto_backup
+        maybe_auto_backup(api.home)
+    except Exception:
         pass
 
-    _Handler.api = api
-    _Handler.static_dir = static_dir or STATIC_DIR
-    server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    Handler.api = api
+    Handler.static_dir = static_dir or STATIC_DIR
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
     return server
 

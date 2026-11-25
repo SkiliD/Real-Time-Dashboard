@@ -35,7 +35,12 @@ def project(conn):
 
 
 def _backdate_session(conn, session_id: int, days_ago: int, minutes: float) -> None:
-    start = datetime.now(timezone.utc) - timedelta(days=days_ago, minutes=minutes)
+    # Anchor at the START of the local day `days_ago` (+1 min), not at
+    # "now - delta": just after midnight, now-delta would land on the previous
+    # day and make "today" assertions flaky.
+    from devdash.core.models import day_start_utc
+
+    start = datetime.fromisoformat(day_start_utc(days_ago)) + timedelta(minutes=1)
     end = start + timedelta(minutes=minutes)
     conn.execute(
         "UPDATE sessions SET started_at = ?, ended_at = ?, duration_min = ? WHERE id = ?",
@@ -62,8 +67,11 @@ def test_streak_days(conn, project):
         s = sessions.start(conn)
         _backdate_session(conn, s.id, ago, mins)
     assert stats.streak_days(conn, project.id) == 3
-    # a gap: delete yesterday's session entirely
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+    # a gap: delete yesterday's session entirely — same LOCAL-day basis as the
+    # anchoring helper (day_start_utc), not the raw UTC date (TZ-dependent)
+    from devdash.core.models import day_start_utc
+
+    yesterday = day_start_utc(1)[:10]
     conn.execute("DELETE FROM sessions WHERE substr(started_at, 1, 10) = ?", (yesterday,))
     conn.commit()
     assert stats.streak_days(conn, project.id) == 1  # only today remains

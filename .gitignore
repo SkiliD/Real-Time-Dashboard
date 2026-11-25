@@ -9,6 +9,7 @@ __pycache__/
 build/
 dist/
 *.whl
+*.exe   # packaged binary at the repo root (AppLocker-blocked locally, never commit)
 
 # --- Environnements virtuels ---
 .venv/

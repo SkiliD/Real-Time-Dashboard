@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_JS = (ROOT / "devdash/gui/static/app.js").read_text(encoding="utf-8")
 INDEX_HTML = (ROOT / "devdash/gui/static/index.html").read_text(encoding="utf-8")
 SERVER_PY = (ROOT / "devdash/gui/server.py").read_text(encoding="utf-8")
-API_PY = (ROOT / "devdash/gui/api.py").read_text(encoding="utf-8")
+# the REST layer is split into gui/api*.py mixins — concatenate them all
+API_PY = "\n".join(f.read_text(encoding="utf-8")
+                   for f in sorted((ROOT / "devdash/gui").glob("api*.py")))
 
 
 @pytest.fixture()

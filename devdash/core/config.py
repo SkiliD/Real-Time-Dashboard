@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
+import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -24,13 +26,14 @@ class Config:
     lang: str = "fr"
 
     # --- AI assistant (fully optional; app works 100% without it) ---
-    # ai_provider: "ollama" | "local" | "cli" | "anthropic" | "mistral" | "openai" | "openai_compat" | "mock"
+    # ai_provider: "ollama" | "local" | "cli" | "anthropic" | "mistral" | "openai" | "openai_compat" | "openrouter" | "mock"
     #   ollama         local HTTP API of Ollama (default http://localhost:11434)
     #   local          ANY local OpenAI-compatible server (LM Studio :1234, llama.cpp :8080, ...)
     #   cli            ANY local AI run as a command line (prompt JSON on stdin, answer on stdout)
     #   anthropic      Claude models via the Anthropic API (cloud, key required)
     #   mistral/openai cloud OpenAI-compatible APIs (default base URLs, key required)
     #   openai_compat  custom OpenAI-compatible endpoint (set ai_base_url + ai_api_key)
+    #   openrouter     ONE key for every major cloud model (Claude, GPT, Gemini, ...) — pick the model in the GUI preset list
     #   mock           deterministic, no network (tests/demos)
     ai_enabled: bool = False
     ai_provider: str = "ollama"
@@ -56,7 +59,13 @@ class Config:
 
     # --- GUI ---
     gui_port: int = 8765
-    theme: str = "dark"  # "dark" | "light"
+
+    # --- automatic backups (GUI start) ---
+    auto_backup_days: int = 1     # 0 = disabled; a zip is written at most every N days
+    auto_backup_keep: int = 5     # zips kept in <home>/backups
+    last_auto_backup: str = ""    # ISO timestamp of the last automatic backup
+    theme: str = "auto"  # "dark" | "light" | "auto" (follows the OS)
+    gui_window: dict = field(default_factory=dict)  # {"x","y","w","h","maximized"}: geometry saved at window close
 
 
 def devdash_home() -> Path:
@@ -92,7 +101,11 @@ _KEY_TYPES: dict[str, tuple[type, ...]] = {
     "pomodoro_break_min": (int,),
     "git_watch_interval_sec": (int,),
     "gui_port": (int,),
+    "auto_backup_days": (int,),
+    "auto_backup_keep": (int,),
+    "last_auto_backup": (str,),
     "theme": (str,),
+    "gui_window": (dict,),
 }
 
 
@@ -125,17 +138,49 @@ def load_config(home: Path | None = None) -> Config:
     return cfg
 
 
+#: serializes load-modify-save cycles: the threaded GUI server can save settings
+#: from several request threads at once — without a lock, last-writer-wins loses
+#: updates (and a crash mid-write used to corrupt the file, silently losing keys)
+_SAVE_LOCK = threading.RLock()
+
+
+def config_lock() -> threading.RLock:
+    """Lock guarding load->modify->save cycles on config.json (RLock: save_config
+    takes it too, so update_config can hold it across the whole cycle)."""
+    return _SAVE_LOCK
+
+
 def save_config(cfg: Config, home: Path | None = None) -> Path:
-    """Persist config.json (chmod 600 where supported: it may hold an API key)."""
+    """Persist config.json ATOMICALLY (tmp file + os.replace: a crash can never
+    leave a half-written file) and chmod 600 where supported (may hold an API key)."""
     path = config_path(home)
-    path.write_text(
-        json.dumps(asdict(cfg), indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass  # Windows: best effort
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _SAVE_LOCK:
+        fd, tmp = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(asdict(cfg), indent=2, ensure_ascii=False))
+            os.replace(tmp, path)  # atomic on POSIX and Windows
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        from .db import restrict_permissions
+        restrict_permissions(path)  # chmod 600 + icacls ACL reset on Windows
     return path
+
+
+def update_config(home: Path | None, fn) -> Config:
+    """Atomic load -> modify -> save under the config lock (thread-safe for the
+    GUI server). `fn(cfg)` mutates the loaded config; ValueError propagates and
+    nothing is written. Returns the saved config."""
+    with _SAVE_LOCK:
+        cfg = load_config(home)
+        fn(cfg)
+        save_config(cfg, home)
+        return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +193,8 @@ _INT_BOUNDS = {
     "pomodoro_break_min": (1, 120),
     "git_watch_interval_sec": (5, 3600),
     "gui_port": (1024, 65535),
+    "auto_backup_days": (0, 365),
+    "auto_backup_keep": (1, 100),
 }
 _MAX_PATTERNS = 10
 _MAX_PATTERN_LEN = 200
@@ -170,19 +217,21 @@ def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) 
     Raises ValueError with a user-safe message on invalid input.
     `lang` must be one of `allowed_langs`.
     """
+    from .i18n import tr  # lazy import: i18n imports config (circular at module level)
+
     if not isinstance(data, dict):
-        raise ValueError("settings must be a JSON object")
+        raise ValueError(tr("err.settings_not_object"))
 
     if "lang" in data and data["lang"] not in (None, ""):
         lang = data["lang"]
         if not isinstance(lang, str) or lang not in allowed_langs:
-            raise ValueError(f"lang must be one of: {', '.join(allowed_langs)}")
+            raise ValueError(tr("err.lang_invalid", items=", ".join(allowed_langs)))
         cfg.lang = lang
 
     if "theme" in data and data["theme"] not in (None, ""):
         theme = data["theme"]
-        if theme not in ("dark", "light"):
-            raise ValueError("theme must be 'dark' or 'light'")
+        if theme not in ("dark", "light", "auto"):
+            raise ValueError(tr("err.theme_invalid"))
         cfg.theme = theme
 
     for key, (lo, hi) in _INT_BOUNDS.items():
@@ -193,9 +242,9 @@ def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) 
             try:
                 v = int(v)
             except (TypeError, ValueError):
-                raise ValueError(f"{key} must be an integer")
+                raise ValueError(tr("err.int_field", field=key))
         if not (lo <= v <= hi):
-            raise ValueError(f"{key} must be between {lo} and {hi}")
+            raise ValueError(tr("err.int_range", field=key, lo=lo, hi=hi))
         setattr(cfg, key, v)
 
     if "commit_patterns" in data and data["commit_patterns"] is not None:
@@ -203,21 +252,18 @@ def apply_general_settings(cfg: Config, data: dict, allowed_langs=("fr", "en")) 
         if isinstance(patterns, str):
             patterns = [p for p in patterns.splitlines() if p.strip()]
         if not isinstance(patterns, list) or not patterns:
-            raise ValueError("commit_patterns must be a non-empty list of regex strings")
+            raise ValueError(tr("err.commit_patterns_invalid"))
         if len(patterns) > _MAX_PATTERNS:
-            raise ValueError(f"commit_patterns: at most {_MAX_PATTERNS} patterns")
+            raise ValueError(tr("err.patterns_count", max=_MAX_PATTERNS))
         for p in patterns:
             if not isinstance(p, str) or len(p) > _MAX_PATTERN_LEN:
-                raise ValueError(f"each commit pattern must be a string of at most {_MAX_PATTERN_LEN} chars")
+                raise ValueError(tr("err.pattern_len", max=_MAX_PATTERN_LEN))
             try:
                 re.compile(p)
             except re.error as e:
-                raise ValueError(f"invalid commit regex {p!r}: {e}")
+                raise ValueError(tr("err.pattern_bad_regex", pattern=p, err=e))
             if _has_nested_quantifier(p):
-                raise ValueError(
-                    f"commit pattern {p!r} is rejected: nested quantifiers can cause "
-                    "catastrophic backtracking (ReDoS)"
-                )
+                raise ValueError(tr("err.pattern_redos", pattern=p))
         cfg.commit_patterns = list(patterns)
 
     return cfg

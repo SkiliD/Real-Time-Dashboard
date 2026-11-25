@@ -4,6 +4,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from .i18n import tr
+
 def now_iso() -> str:
     """Current UTC time as an ISO-8601 string (seconds precision)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -17,7 +19,7 @@ MAX_TEXT_LEN = 100_000  # descriptions / devlog entries: room for long-term note
 def check_text(value: str, field: str, max_len: int = MAX_TEXT_LEN) -> str:
     """Cap a user text field; raise a clean ValueError when it is too long."""
     if value is not None and len(value) > max_len:
-        raise ValueError(f"{field} too long (max {max_len} chars, got {len(value)})")
+        raise ValueError(tr("err.text_too_long", field=field, max=max_len, got=len(value)))
     return value
 
 
@@ -76,6 +78,7 @@ class Project:
     created_at: str
     updated_at: str
     languages: list[str] = field(default_factory=list)  # JSON array in the row
+    path: str = ""  # connected project folder (empty = none); opened in the OS explorer only
 
     @classmethod
     def from_row(cls, row) -> "Project":
@@ -101,6 +104,7 @@ class Feature:
     feedback: str | None
     created_at: str
     validated_at: str | None
+    deleted_at: str | None = None  # soft delete (corbeille); NULL = visible
 
     @classmethod
     def from_row(cls, row) -> "Feature":
@@ -126,6 +130,7 @@ class Task:
     created_at: str = ""
     updated_at: str = ""
     completed_at: str | None = None
+    deleted_at: str | None = None  # soft delete (corbeille); NULL = visible
 
     @classmethod
     def from_row(cls, row) -> "Task":
@@ -167,6 +172,7 @@ class LogEntry:
     content: str
     tags: list[str] = field(default_factory=list)
     created_at: str = ""
+    deleted_at: str | None = None  # soft delete (corbeille); NULL = visible
 
     @classmethod
     def from_row(cls, row) -> "LogEntry":

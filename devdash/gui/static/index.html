@@ -4,10 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DevDash</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' rx='5' fill='%232563eb'/%3E%3Cpath d='M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <script>/* apply the saved theme before first paint (no flash of the wrong theme) */
-    try { document.documentElement.dataset.theme = localStorage.getItem("devdash-theme") || "dark"; }
-    catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' rx='5' fill='%232563eb'/%3E%3Cpath d='M3.5 11.5h3l2-5 3.5 8 2-4.5h3.5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <script>/* apply the saved theme before first paint (no flash of the wrong theme);
+    "auto" resolves against the OS preference right here */
+    try {
+      var t = localStorage.getItem("devdash-theme") || "auto";
+      if (t === "auto") t = (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+      document.documentElement.dataset.theme = t;
+    } catch (e) { document.documentElement.dataset.theme = "dark"; }
+    /* native pywebview window (frameless): show the custom title bar.
+       pywebviewready is re-checked in app.js in case the API is injected late */
+    if (window.pywebview || /[?&]native=1/.test(location.search)) document.documentElement.classList.add("native");</script>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -20,11 +27,21 @@
     <div class="palette-hint dim" data-i18n="gui.palette.hint"></div>
   </div>
 </div>
+<div id="titlebar">
+  <div class="tb-brand"><svg class="brand-mark" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#2563eb"/><path d="M3.5 11.5h3l2-5 3.5 8 2-4.5h3.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>DevDash</span></div>
+  <div class="tb-spacer"></div>
+  <button id="btn-win-min" class="tb-btn" type="button" data-i18n-title="gui.win.min_tt" title="Réduire">–</button>
+  <button id="btn-win-max" class="tb-btn" type="button" data-i18n-title="gui.win.max_tt" title="Agrandir">▢</button>
+  <button id="btn-win-close" class="tb-btn tb-close" type="button" data-i18n-title="gui.win.close_tt" title="Fermer">✕</button>
+</div>
 <div id="app">
 
   <aside id="sidebar">
 
-    <div class="brand"><svg class="brand-mark" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#2563eb"/><path d="M6.5 5.5h4a4.5 4.5 0 0 1 0 9h-4z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>Dev<span>Dash</span></div>
+    <div class="brand-row">
+      <div class="brand"><svg class="brand-mark" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect width="20" height="20" rx="5" fill="#2563eb"/><path d="M3.5 11.5h3l2-5 3.5 8 2-4.5h3.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Dev<span>Dash</span></div>
+      <button id="btn-sidebar-toggle" class="sidebar-toggle" type="button" data-i18n-title="gui.sidebar.toggle_tt" title="Réduire / déplier la barre latérale">‹</button>
+    </div>
     <button id="btn-new-project" class="btn btn-primary btn-block" data-i18n="gui.new_project">+ Nouveau projet</button>
     <ul id="project-list" class="project-list"></ul>
     <div class="sidebar-footer"><span data-i18n="gui.local">local · </span><span id="conn-status">●</span></div>
@@ -36,6 +53,7 @@
 
       <div id="project-header-left"></div>
       <div class="spacer"></div>
+      <span id="last-update" class="dim small"></span>
       <div id="header-progress" title="Progression du projet"><div id="header-progress-bar"></div></div>
       <div id="session-panel">
 
@@ -50,9 +68,12 @@
           <option value="pause" data-i18n="kind.pause">Pause</option>
           <option value="custom" data-i18n="kind.custom">Libre</option>
         </select>
-        <div class="stepper" data-i18n-title="gui.sess.minutes_tt" title="Durée (min, optionnel)">
+        <div class="stepper" data-i18n-title="gui.sess.minutes_tt" title="Durée cible (min, optionnel)">
           <button type="button" id="sess-minus" data-i18n-title="gui.sess.minus_tt" title="Diminuer de 5 min">−</button>
-          <input id="session-minutes" type="number" min="1" max="480" step="5" data-i18n-ph="gui.sess.minutes" placeholder="min">
+          <div class="stepper-field">
+            <input id="session-minutes" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" data-i18n-ph="gui.sess.minutes" placeholder="auto">
+            <span class="stepper-unit" data-i18n="gui.sess.min_unit">min</span>
+          </div>
           <button type="button" id="sess-plus" data-i18n-title="gui.sess.plus_tt" title="Augmenter de 5 min">+</button>
         </div>
         <label class="dim chk-inline" data-i18n-title="gui.sess.pomodoro" title="Pomodoro"><input type="checkbox" id="session-pomodoro"> 🍅</label>
@@ -65,9 +86,10 @@
     <nav id="tabs">
       <button class="tab active" data-tab="tasks"><span data-i18n="gui.tab.tasks">Tâches</span><span class="tab-badge hidden" id="badge-tasks"></span></button>
       <button class="tab" data-tab="log"><span data-i18n="gui.tab.log">Devlog</span></button>
-      <button class="tab" data-tab="git"><span data-i18n="gui.tab.git">Git</span></button>
+      <button class="tab" data-tab="git"><span data-i18n="gui.tab.git">Git</span><span class="tab-dot hidden" id="badge-git"></span></button>
       <button class="tab" data-tab="features"><span data-i18n="gui.tab.features">Features</span><span class="tab-badge hidden" id="badge-features"></span></button>
       <button class="tab" data-tab="stats"><span data-i18n="gui.tab.stats">Stats</span></button>
+      <button class="tab" data-tab="timeline"><span data-i18n="gui.tab.timeline">Timeline</span><span class="tab-dot hidden" id="badge-timeline"></span></button>
       <button class="tab hidden" data-tab="ai" id="tab-ai-btn"><span data-i18n="gui.tab.ai">Assistant IA</span></button>
       <button class="tab" data-tab="settings"><span data-i18n="gui.tab.settings">Réglages</span></button>
     </nav>
@@ -84,6 +106,7 @@
         </select>
         <input id="new-task-tags" type="text" data-i18n-ph="gui.tags_ph" placeholder="Tags (séparés par des virgules)">
         <input id="new-task-est" type="number" min="0" step="5" data-i18n-ph="gui.est_ph" placeholder="Est. (min)" data-i18n-title="gui.est_title" title="Estimation en minutes">
+        <select id="new-task-feature" data-i18n-title="gui.task.feature" title="Feature liée"><option value="" data-i18n="gui.task.none">— aucune —</option></select>
         <button id="btn-add-task" class="btn" data-i18n="gui.add">Ajouter</button>
         <span class="spacer"></span>
         <input id="filter-search" type="text" data-i18n-ph="gui.task.search_ph" placeholder="Rechercher…">
@@ -94,6 +117,12 @@
           <option value="low" data-i18n="prio.low">Basse</option>
         </select>
         <select id="filter-tag"><option value="" data-i18n="gui.all_tags">Tous les tags</option></select>
+        <select id="filter-subtasks" data-i18n-title="gui.view.subtasks_tt" title="Comment afficher les sous-tâches">
+          <option value="stacked" data-i18n="gui.view.stacked">↳ empilées sous le parent</option>
+          <option value="flat" data-i18n="gui.view.flat">à plat</option>
+        </select>
+        <button id="btn-reset-filters" type="button" class="btn btn-sm hidden" data-i18n="gui.filters.reset" data-i18n-title="gui.filters.reset_tt" title="Effacer recherche, priorité, tag et vue">✖ filtres</button>
+        <button id="btn-trash" type="button" class="tool-toggle" data-i18n-title="gui.trash_tt" title="" aria-pressed="false">🗑 <span data-i18n="gui.trash">Corbeille</span></button>
       </div>
 
       <div id="kanban">
@@ -101,6 +130,16 @@
         <div class="col" data-status="in_progress"><h3><span data-i18n="gui.col.in_progress">En cours</span> <span class="count" id="count-in_progress"></span></h3><div class="cards" id="col-in_progress"></div></div>
         <div class="col" data-status="done"><h3><span data-i18n="gui.col.done">Terminées</span> <span class="count" id="count-done"></span></h3><div class="cards" id="col-done"></div></div>
         <div class="col col-cancelled" data-status="cancelled"><h3><span data-i18n="gui.col.cancelled">Annulées</span> <span class="count" id="count-cancelled"></span></h3><div class="cards" id="col-cancelled"></div></div>
+      </div>
+
+      <div id="trash-view" class="hidden">
+        <div id="trash-head" class="hidden"><h3>🗑 <span data-i18n="gui.trash">Corbeille</span> <span class="count" id="trash-count"></span></h3></div>
+        <div id="trash-empty" class="hidden">
+          <div class="empty-icon">🗑</div>
+          <p data-i18n="gui.trash.empty">Corbeille vide</p>
+          <p class="dim small" data-i18n="gui.trash.empty_hint"></p>
+        </div>
+        <ul id="trash-list"></ul>
       </div>
 
       <div id="tasks-empty" class="hidden"><p class="dim" data-i18n="gui.tasks.empty"></p></div>
@@ -118,6 +157,7 @@
         <button id="btn-add-log" class="btn" data-i18n="gui.add">Ajouter</button>
         <span class="spacer"></span>
         <input id="log-search" type="text" data-i18n-ph="gui.log_search_ph" placeholder="Rechercher dans le devlog…">
+        <label class="chk" data-i18n-title="gui.trash_tt" title=""><input type="checkbox" id="log-trash"> <span data-i18n="gui.trash">Corbeille</span></label>
       </div>
       <ul id="log-list"></ul>
     </section>
@@ -129,13 +169,39 @@
         <button id="btn-git-link" class="btn btn-sm" data-i18n="gui.git_link">Lier le dépôt</button>
         <button id="btn-git-unlink" class="btn btn-sm" data-i18n="gui.git_unlink">Délier</button>
         <button id="btn-git-sync" class="btn btn-sm" data-i18n="gui.git_sync">↻ Sync</button>
+        <button id="btn-git-fetch" type="button" class="btn btn-sm" data-i18n="gui.git.fetch" data-i18n-title="gui.git.fetch_tt" title="Mettre à jour les refs distantes du dépôt lié (lecture seule)">⇩ Fetch</button>
+        <button id="btn-git-pull" type="button" class="btn btn-sm" data-i18n="gui.git.pull" data-i18n-title="gui.git.pull_tt" title="Avancer la branche en fast-forward uniquement (--ff-only)">⇩ Pull</button>
         <button id="btn-git-ignore" class="btn btn-sm" data-i18n="gui.git.ignore_btn" data-i18n-title="gui.git.ignore_tt" title="Ajouter le bloc DevDash au .gitignore du dépôt (fichiers locaux jamais commités)">Ajouter au .gitignore</button>
         <span id="git-ignore-status" class="dim small"></span>
+        <button id="btn-git-open" type="button" class="btn btn-sm" data-i18n="gui.git.open_repo" data-i18n-title="gui.git.open_repo_tt" title="Ouvrir le dépôt dans l'explorateur de fichiers">📂 Ouvrir le dépôt</button>
+        <select id="git-branches" data-i18n-title="gui.git.branches_tt" title="Branches locales (lecture seule — voir les derniers commits d'une branche)"></select>
+        <button id="btn-git-changes" type="button" class="btn btn-sm" data-i18n-title="gui.git.changes_tt" title="Fichiers modifiés (working tree)">🗎 <span data-i18n="gui.git.changes">Modifiés</span> <span class="count" id="git-changes-count"></span></button>
         <span class="spacer"></span>
         <select id="git-task-filter"><option value="" data-i18n="gui.git.all_tasks">Toutes les tâches</option></select>
         <label class="dim"><input type="checkbox" id="git-unparsed"> <span data-i18n="gui.git_unparsed">Commits non reconnus</span></label>
       </div>
       <div id="git-status" class="dim"></div>
+      <div id="git-changes" class="hidden">
+        <div class="git-changes-head">
+          <span data-i18n="gui.git.changes">Fichiers modifiés</span>
+          <span id="git-changes-stats" class="dim small"></span>
+          <label class="dim small sel-ctl"><input type="checkbox" id="git-sel-all"> <span data-i18n="gui.git.sel_all">Tout</span></label>
+          <span id="git-sel-count" class="dim small"></span>
+          <label class="dim small sel-ctl"><input type="checkbox" id="git-diff-staged"> <span data-i18n="gui.git.staged">index</span></label>
+          <button id="btn-git-diff-sel" type="button" class="btn btn-sm" data-i18n="gui.git.diff_sel" data-i18n-title="gui.git.diff_sel_tt" title="Diff combiné des fichiers cochés (lecture seule)">Diff sélection</button>
+          <span class="spacer"></span>
+          <button id="btn-git-changes-refresh" type="button" class="btn btn-sm" data-i18n-title="gui.git.refresh_tt" title="Rafraîchir">↻</button>
+        </div>
+        <div id="git-linked-task" class="hidden"></div>
+        <ul id="git-changes-list"></ul>
+      </div>
+      <div id="git-cmd-row">
+        <span class="dim mono">git$</span>
+        <input id="git-cmd" type="text" data-i18n-ph="gui.git.cmd_ph" placeholder="log --oneline -5" spellcheck="false">
+        <button id="btn-git-run" type="button" class="btn btn-sm" data-i18n="gui.git.run_btn">Exécuter</button>
+        <span id="git-cmd-status" class="dim small status-line"></span>
+      </div>
+      <pre id="git-cmd-out" class="hidden"></pre>
       <ul id="git-commit-list"></ul>
     </section>
 
@@ -143,6 +209,8 @@
       <div id="feature-toolbar">
         <input id="feature-name" type="text" data-i18n-ph="gui.feature_ph" placeholder="Nouvelle feature (ex. : dash)…">
         <button id="btn-add-feature" class="btn" data-i18n="gui.add">Ajouter</button>
+        <span class="spacer"></span>
+        <label class="chk" data-i18n-title="gui.trash_tt" title=""><input type="checkbox" id="feat-trash"> <span data-i18n="gui.trash">Corbeille</span></label>
       </div>
       <ul id="feature-list"></ul>
     </section>
@@ -162,15 +230,108 @@
         <button id="btn-chat-send" class="btn btn-sm btn-primary" data-i18n="gui.chat_send">Envoyer</button>
         <button id="btn-chat-week" class="btn btn-sm" data-i18n="gui.chat_week">Résumer ma semaine</button>
         <button id="btn-chat-context" class="btn btn-sm" data-i18n="gui.chat_context">Voir le contexte envoyé à l’IA</button>
+        <button id="btn-chat-clear" class="btn btn-sm" data-i18n="gui.chat.clear" data-i18n-title="gui.chat.clear_tt" title="Effacer l’historique du chat">🗑</button>
       </div>
     </section>
 
     <section id="tab-settings" class="tab-page hidden">
       <div class="settings-grid">
       <div class="settings-card">
+        <h3 data-i18n="gui.set.general">Général</h3>
+        <p class="dim" data-i18n="gui.set.general_note"></p>
+        <div class="field">
+          <label for="cfg-lang" data-i18n="gui.set.lang">Langue de l’interface</label>
+          <select id="cfg-lang"></select>
+        </div>
+        <div class="field">
+          <label for="cfg-theme" data-i18n="gui.set.theme">Thème</label>
+          <select id="cfg-theme">
+            <option value="auto" data-i18n="gui.set.theme.auto">Auto (système)</option>
+            <option value="dark" data-i18n="gui.set.theme.dark">Sombre</option>
+            <option value="light" data-i18n="gui.set.theme.light">Clair</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cfg-pomo-focus" data-i18n="gui.set.pomo_focus">Pomodoro — focus (min)</label>
+            <input id="cfg-pomo-focus" type="number" min="1" max="240" step="1">
+          </div>
+          <div class="field">
+            <label for="cfg-pomo-break" data-i18n="gui.set.pomo_break">Pomodoro — pause (min)</label>
+            <input id="cfg-pomo-break" type="number" min="1" max="120" step="1">
+          </div>
+        </div>
+        <div class="field">
+          <label for="cfg-git-watch" data-i18n="gui.set.git_watch">Surveillance Git (secondes)</label>
+          <input id="cfg-git-watch" type="number" min="5" max="3600" step="5">
+        </div>
+        <div class="field">
+          <label for="cfg-port" data-i18n="gui.set.gui_port">Port de la GUI (au prochain lancement)</label>
+          <input id="cfg-port" type="number" min="1024" max="65535" step="1">
+        </div>
+        <div class="field">
+          <label for="cfg-patterns" data-i18n="gui.set.commit_patterns">Patterns commits → tâches/features</label>
+          <textarea id="cfg-patterns" rows="3" spellcheck="false"></textarea>
+          <div class="dim field-desc" data-i18n="gui.set.commit_patterns_desc"></div>
+        </div>
+        <div class="settings-actions">
+          <button id="btn-general-save" class="btn btn-primary" data-i18n="gui.set.save">Enregistrer</button>
+          <span id="general-status" class="dim"></span>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="gui.set.data">Données</h3>
+        <p class="dim small mono" id="set-home"></p>
+        <p class="dim" data-i18n="gui.set.backup_desc"></p>
+        <div class="field-row">
+          <div class="field">
+            <label for="cfg-auto-backup-days" data-i18n="gui.set.auto_backup">Sauvegarde auto (jours, 0 = off)</label>
+            <input id="cfg-auto-backup-days" type="number" min="0" max="365" step="1">
+          </div>
+          <div class="field">
+            <label for="cfg-auto-backup-keep" data-i18n="gui.set.auto_backup_keep">Backups conservés</label>
+            <input id="cfg-auto-backup-keep" type="number" min="1" max="100" step="1">
+          </div>
+        </div>
+        <p class="dim small" id="set-last-backup"></p>
+        <div class="settings-actions">
+          <button id="btn-backup" class="btn" data-i18n="gui.set.backup_btn">Sauvegarder maintenant (zip)</button>
+          <button id="btn-export" class="btn" data-i18n="gui.set.export_btn">Exporter en JSON</button>
+          <button id="btn-open-home" class="btn" data-i18n="gui.set.open_home">Ouvrir le dossier de données</button>
+          <button id="btn-demo" class="btn" data-i18n="gui.set.demo_btn">Charger les données de démo</button>
+          <span id="backup-status" class="dim"></span>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="gui.upd.title">Mise à jour</h3>
+        <p class="dim small" id="upd-info"></p>
+        <div class="settings-actions">
+          <button id="btn-upd-check" class="btn" data-i18n="gui.upd.check">Vérifier les mises à jour</button>
+          <button id="btn-upd-run" class="btn btn-primary hidden" data-i18n="gui.upd.update">Mettre à jour maintenant</button>
+          <span id="upd-status" class="dim status-line"></span>
+        </div>
+        <div class="upd-progress" id="upd-progress"><div class="bar"></div></div>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="gui.build.title">Exécutable (.exe)</h3>
+        <p class="dim" data-i18n="gui.build.desc"></p>
+        <div class="settings-actions">
+          <button id="btn-build" class="btn" data-i18n="gui.build.btn">Générer devdash.exe</button>
+          <label class="chk"><input type="checkbox" id="build-onefile"> <span data-i18n="gui.build.onefile">Fichier unique (onefile)</span></label>
+          <span id="build-status" class="dim status-line"></span>
+        </div>
+        <div class="upd-progress" id="build-progress"><div class="bar"></div></div>
+        <pre id="build-log" class="build-log mono small hidden"></pre>
+      </div>
+
+      <div class="settings-card">
         <h3 data-i18n="gui.set.title">Assistant IA (optionnel)</h3>
         <p class="dim" data-i18n="gui.set.sub"></p>
         <label class="chk"><input type="checkbox" id="cfg-enabled"> <span data-i18n="gui.set.enabled">Activer l’assistant IA</span></label>
+        <div id="ai-config-body">
 
         <div class="field">
           <label for="cfg-provider" data-i18n="gui.set.provider">Provider</label>
@@ -179,7 +340,8 @@
         </div>
         <div class="field" id="field-model">
           <label for="cfg-model" data-i18n="gui.set.model">Modèle</label>
-          <input id="cfg-model" type="text" data-i18n-ph="gui.set.model_ph" placeholder="">
+          <select id="cfg-model"></select>
+          <input id="cfg-model-custom" type="text" class="hidden" data-i18n-ph="gui.set.model_ph" placeholder="">
         </div>
         <div class="field" id="field-base-url">
           <label for="cfg-base-url" data-i18n="gui.set.base_url">URL de base (optionnel)</label>
@@ -218,69 +380,9 @@
           <span id="cfg-status" class="dim"></span>
         </div>
         <p class="dim small" id="cfg-path"></p>
-      </div>
-
-      <div class="settings-card">
-        <h3 data-i18n="gui.set.general">Général</h3>
-        <p class="dim" data-i18n="gui.set.general_note"></p>
-        <div class="field">
-          <label for="cfg-lang" data-i18n="gui.set.lang">Langue de l’interface</label>
-          <select id="cfg-lang"></select>
-        </div>
-        <div class="field">
-          <label for="cfg-theme" data-i18n="gui.set.theme">Thème</label>
-          <select id="cfg-theme">
-            <option value="dark" data-i18n="gui.set.theme.dark">Sombre</option>
-            <option value="light" data-i18n="gui.set.theme.light">Clair</option>
-          </select>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="cfg-pomo-focus" data-i18n="gui.set.pomo_focus">Pomodoro — focus (min)</label>
-            <input id="cfg-pomo-focus" type="number" min="1" max="240" step="1">
-          </div>
-          <div class="field">
-            <label for="cfg-pomo-break" data-i18n="gui.set.pomo_break">Pomodoro — pause (min)</label>
-            <input id="cfg-pomo-break" type="number" min="1" max="120" step="1">
-          </div>
-        </div>
-        <div class="field">
-          <label for="cfg-git-watch" data-i18n="gui.set.git_watch">Surveillance Git (secondes)</label>
-          <input id="cfg-git-watch" type="number" min="5" max="3600" step="5">
-        </div>
-        <div class="field">
-          <label for="cfg-port" data-i18n="gui.set.gui_port">Port de la GUI (au prochain lancement)</label>
-          <input id="cfg-port" type="number" min="1024" max="65535" step="1">
-        </div>
-        <div class="field">
-          <label for="cfg-patterns" data-i18n="gui.set.commit_patterns">Patterns commits → tâches/features</label>
-          <textarea id="cfg-patterns" rows="3" spellcheck="false"></textarea>
-          <div class="dim field-desc" data-i18n="gui.set.commit_patterns_desc"></div>
         </div>
       </div>
 
-      <div class="settings-card">
-        <h3 data-i18n="gui.set.data">Données</h3>
-        <p class="dim small mono" id="set-home"></p>
-        <p class="dim" data-i18n="gui.set.backup_desc"></p>
-        <div class="settings-actions">
-          <button id="btn-backup" class="btn" data-i18n="gui.set.backup_btn">Sauvegarder maintenant (zip)</button>
-          <button id="btn-export" class="btn" data-i18n="gui.set.export_btn">Exporter en JSON</button>
-          <button id="btn-open-home" class="btn" data-i18n="gui.set.open_home">Ouvrir le dossier de données</button>
-          <button id="btn-demo" class="btn" data-i18n="gui.set.demo_btn">Charger les données de démo</button>
-          <span id="backup-status" class="dim"></span>
-        </div>
-      </div>
-
-      <div class="settings-card">
-        <h3 data-i18n="gui.upd.title">Mise à jour</h3>
-        <p class="dim small" id="upd-info"></p>
-        <div class="settings-actions">
-          <button id="btn-upd-check" class="btn" data-i18n="gui.upd.check">Vérifier les mises à jour</button>
-          <button id="btn-upd-run" class="btn btn-primary" data-i18n="gui.upd.update">Mettre à jour maintenant</button>
-          <span id="upd-status" class="dim"></span>
-        </div>
-      </div>
       </div>
     </section>
 
@@ -297,6 +399,7 @@
         </label>
         <span class="spacer"></span>
         <button id="btn-stats-png" class="btn btn-sm" data-i18n="gui.stats.png">⬇ PNG</button>
+        <button id="btn-report-week" class="btn btn-sm" data-i18n="gui.report.btn">⬇ Rapport hebdo (.md)</button>
       </div>
       <div id="stat-cards">
         <div class="stat-card"><div class="stat-value" id="stat-today">–</div><div class="stat-label" data-i18n="gui.stat.today">Aujourd’hui</div></div>
@@ -311,7 +414,33 @@
         <div class="chart-box"><h4 data-i18n="gui.chart.tags">Répartition par tag (tâches)</h4><canvas id="chart-tags"></canvas></div>
         <div class="chart-box"><h4 data-i18n="gui.chart.progress">Progression du projet (pondérée)</h4><canvas id="chart-progress"></canvas></div>
         <div class="chart-box"><h4 id="chart-projects-title" data-i18n="gui.chart.by_project">Temps par projet</h4><canvas id="chart-projects"></canvas></div>
+        <div class="chart-box" id="est-box">
+          <h4 data-i18n="gui.est.title">Estimé vs réel</h4>
+          <div id="est-summary" class="dim"></div>
+          <div id="est-over-line" class="dim"></div>
+          <table id="est-table"><thead><tr>
+            <th data-i18n="gui.est.col.task">Tâche</th><th data-i18n="gui.est.col.est">Estimé</th><th data-i18n="gui.est.col.act">Réel</th>
+          </tr></thead><tbody id="est-tbody"></tbody></table>
+        </div>
       </div>
+    </section>
+    <section id="tab-timeline" class="tab-page hidden">
+      <div id="tl-toolbar">
+        <label><span data-i18n="gui.tl.filter">Filtrer</span>
+          <select id="tl-filter">
+            <option value="" data-i18n="gui.tl.all">Tout</option>
+            <option value="task" data-i18n="tl.task">Tâches</option>
+            <option value="session" data-i18n="tl.session">Sessions</option>
+            <option value="log" data-i18n="tl.log">Devlog</option>
+            <option value="git" data-i18n="tl.git">Git</option>
+            <option value="feature" data-i18n="tl.feature">Features</option>
+            <option value="project" data-i18n="tl.project">Projet</option>
+          </select>
+        </label>
+        <span class="spacer"></span>
+        <button id="btn-tl-refresh" class="btn btn-sm" data-i18n="gui.tl.refresh" title="↻">↻</button>
+      </div>
+      <ul id="tl-list"></ul>
     </section>
   </main>
 </div>
@@ -337,6 +466,10 @@
       </select>
     </label>
     <label><span data-i18n="gui.modal.desc">Description</span> <textarea id="e-desc" rows="5" class="desc-input" maxlength="100000" data-i18n-ph="gui.modal.optional" placeholder="Optionnel"></textarea></label>
+    <label><span data-i18n="gui.edit.path" data-i18n-title="gui.edit.path_tt" title="">Dossier du projet</span>
+      <div class="path-row"><input id="e-path" type="text" data-i18n-ph="gui.modal.path_ph" placeholder="C:\\projets\\mon-jeu…" spellcheck="false">
+      <button id="btn-browse-epath" type="button" class="btn btn-sm" data-i18n="gui.browse">Parcourir…</button></div>
+    </label>
     <label class="chk"><input type="checkbox" id="e-archived"> <span data-i18n="gui.proj.archived">Archivé (masqué de la liste)</span></label>
     <p class="dim small hidden" id="e-delete-warn" data-i18n="gui.edit.delete_warn"></p>
     <div class="modal-actions">
@@ -440,8 +573,25 @@
       <tr><td><kbd>Échap</kbd></td><td data-i18n="gui.help.k7"></td></tr>
       <tr><td><kbd>?</kbd></td><td data-i18n="gui.help.k8"></td></tr>
     </table>
-    <div class="modal-actions"><span class="spacer"></span>
+    <div class="modal-actions">
+      <button id="btn-tour" class="btn" data-i18n="tour.replay">🎯 Revoir la visite guidée</button>
+      <span class="spacer"></span>
       <button id="btn-close-help" class="btn btn-primary" data-i18n="gui.modal.close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<div id="tour" class="hidden" role="dialog" aria-modal="true">
+  <div class="tour-backdrop"></div>
+  <div id="tour-card" class="modal-card tour-card">
+    <div id="tour-step-label" class="dim small"></div>
+    <h3 id="tour-title"></h3>
+    <p id="tour-text" class="dim"></p>
+    <div class="modal-actions">
+      <button id="tour-skip" class="btn btn-sm" data-i18n="tour.skip">Passer</button>
+      <span class="spacer"></span>
+      <button id="tour-prev" class="btn btn-sm" data-i18n="tour.prev">← Précédent</button>
+      <button id="tour-next" class="btn btn-primary" data-i18n="tour.next">Suivant →</button>
     </div>
   </div>
 </div>

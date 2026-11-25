@@ -171,3 +171,36 @@ def test_pomodoro_break_offer(conn, project, monkeypatch):
     stopped3 = sessions.stop(conn, s3.id)
     monkeypatch.setattr(sess_cmd.typer, "confirm", lambda *a, **k: True)
     assert sess_cmd._maybe_start_break(conn, cfg, stopped3) is False
+
+
+# --- automatic backups (config + maybe_auto_backup + prune) --------------------
+
+def test_maybe_auto_backup_creates_prunes_and_skips(home):
+    from devdash.core import config as cfgmod, db
+    from devdash.core.backup import maybe_auto_backup, _prune_backups
+    c = db.connect(cfgmod.db_path(home)); db.init_db(c); c.close()
+    cfgmod.update_config(home, lambda c: setattr(c, "auto_backup_days", 1))
+    # first run: creates a zip in <home>/backups and stamps last_auto_backup
+    r = maybe_auto_backup(home, now="2026-11-01T10:00:00+00:00")
+    assert r and r["path"].endswith(".zip") and Path(r["path"]).is_file()
+    assert cfgmod.load_config(home).last_auto_backup == "2026-11-01T10:00:00+00:00"
+    # same day: skipped
+    assert maybe_auto_backup(home, now="2026-11-01T12:00:00+00:00") is None
+    # next day: new backup
+    r2 = maybe_auto_backup(home, now="2026-11-02T11:00:00+00:00")  # 25h later
+    assert r2 and r2["path"] != r["path"]
+    # disabled (0 days): never backs up
+    cfgmod.update_config(home, lambda c: setattr(c, "auto_backup_days", 0))
+    assert maybe_auto_backup(home, now="2026-12-01T00:00:00+00:00") is None
+    # prune keeps only `keep` newest zips (2 real backups + 3 extra = 5 -> keep 2)
+    cfgmod.update_config(home, lambda c: setattr(c, "auto_backup_keep", 2))
+    import os
+    for i in range(3):
+        p = home / "backups" / f"devdash-backup-extra{i}.zip"
+        p.write_bytes(b"x")
+        os.utime(p, (1000000 + i, 1000000 + i))
+    assert _prune_backups(home / "backups", 2) == 3
+    assert len(list((home / "backups").glob("devdash-backup-*.zip"))) == 2
+    # unreadable stamp -> backs up instead of skipping
+    cfgmod.update_config(home, lambda c: (setattr(c, "auto_backup_days", 1), setattr(c, "last_auto_backup", "garbage")))
+    assert maybe_auto_backup(home, now="2026-11-03T00:00:00+00:00") is not None

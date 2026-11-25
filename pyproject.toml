@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "devdash"
-version = "0.1.0"
+version = "0.9.0b1"  # beta 1 of 0.9.0 (PEP 440 pre-release: sorts before 0.9.0, signals beta)
 description = "DevDash - portable local dev dashboard for solo developers (game or not): CLI + native desktop GUI, read-only Git integration, optional AI assistant."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,6 +28,7 @@ include = ["devdash*"]
 
 [tool.setuptools.package-data]
 devdash = ["core/schema.sql"]
+"devdash.gui" = ["static/*", "static/vendor/*", "icon.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
